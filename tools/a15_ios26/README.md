@@ -38,7 +38,18 @@ python tools/a15_ios26/analyze_titan.py \
   --live-layout tools/a15_ios26/live-layout-iphone14_2-23A355.json \
   --output titan-static-report.md \
   --json-output titan-static-report.json
+
+python tools/a15_ios26/build_response_trace.py \
+  --titan-report titan-static-report.json \
+  --sptm-txm-report sptm-txm-static-report.json \
+  --json-output response-trace.json \
+  --markdown-output response-trace.md
 ```
+
+`build_response_trace.py` combines the existing reports into an ordered,
+provenance-aware diagnostic trace. It deliberately labels runtime SPTM/TXM
+responses as `NOT_REACHED` until direct evidence exists; offline or read-only
+observations are never promoted to hardware responses.
 
 The kernel image may be an Apple fileset kernelcache. The analyzer selects the
 `com.apple.kernel` fileset automatically.

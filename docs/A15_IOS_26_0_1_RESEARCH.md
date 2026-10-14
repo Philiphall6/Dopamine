@@ -14,18 +14,111 @@ jailbreak path on this exact device and OS combination.
 - Research state: `MAPPING_VALIDATED_TITAN_EXECUTION_BLOCKED`
 - Operating mode: bounded read-only observation and offline static analysis
 
+## End-to-End Chain Status
+
+| Stage | Status | Evidence or blocker |
+|---|---|---|
+| Device and firmware identity | **PASS** | iPhone14,2 / A15 / 23A355 / iOS 26.0.1 |
+| Read-only acquisition path | **PASS** | Filza bridge plus USB forwarding; probe restored disabled after each bounded capture |
+| Kernelcache, GFX, SPTM, and TXM extraction | **PASS** | Offline analyzers accept all four extracted images |
+| RTBuddy object and segment layout | **PASS** | Live object chain, two descriptors, and physical/virtual/remap field roles resolved |
+| Existing GFX IORVBAR mapping | **VALIDATED** | One existing 8-byte `IOMemoryMap`; address recorded but never dereferenced |
+| iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
+| TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
+| Kernel read/write exploit primitive | **MISSING** | No target-compatible primitive has been established |
+| Titan unrestricted physical write | **BLOCKED** | No command queue, GPU trigger, MMIO access, or physical write was executed |
+| SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
+| Bootstrap, trust-cache, and jailbreak services | **NOT REACHABLE** | Depend on the missing kernel and SPTM primitives |
+| A15/iOS 26 support declaration | **BLOCKED** | App guard returns unsupported before exploit selection |
+
+The first unresolved operational link is a valid kernel read/write primitive
+for this exact target. Even if that existed, Titan's physical-write stage and
+the SPTM/PAPT bypass would still require separate validation. Passing static
+patchfinders does not bridge either gap.
+
+## How the Published Titan Chain Works
+
+Titan is not a direct TXM bypass. Dopamine first requires a compatible kernel
+exploit to provide kernel read/write. It initializes kernel translation and
+IOSurface helpers, then loads Titan as the selected PPL/SPTM-stage component.
+
+The published Titan path has four architectural phases:
+
+1. It uses the existing kernel read primitive to discover the kernel pmap,
+   translation roots, IOGPU objects, RTBuddy state, and GFX firmware mappings.
+2. It copies and statically analyzes the running GFX firmware to resolve the
+   version-specific RTKit state and control-flow anchors needed by the published
+   implementation.
+3. It uses the validated GFX/RTKit path to create a controlled CPU mapping
+   window. Titan exports this result to Dopamine only as an unrestricted
+   physical-write callback (`physwritebuf`).
+4. Dopamine consumes that callback to construct its normal physical read/write
+   layer. TXM and SPTM offsets found by XPF are downstream inputs for protected
+   trust-cache, developer-mode, translation, and page-protection operations;
+   knowing their static addresses does not create the physical-write primitive.
+
+For iPhone14,2 on iOS 26.0.1, phases 1 and 2 are only partially represented by
+offline and bounded read-only evidence. The current research guard stops before
+GPU command-buffer setup. No target-compatible kernel read/write exploit,
+RTKit execution path, controlled mapping window, unrestricted physical write,
+or SPTM bypass has been established. The static TXM base and passing XPF
+relationships therefore improve the map of the chain but do not bypass TXM.
+
+## Diagnostic Response Logging
+
+Every future diagnostic observation should record a timestamp, stage identifier,
+input class, return status, and last completed stage. A process exit or reboot
+must be recorded as an interrupted stage rather than interpreted as a protocol
+response.
+
+On the current build, the iOS 26 guard returns before Titan command-buffer
+setup. Consequently there is no live GPU, RTKit-execution, SPTM, or TXM response
+to decode yet. The available response set is limited to target identification,
+offline patchfinder results, bounded IORegistry/RTBuddy reads, IOMemoryMap
+metadata, and the explicit Titan diagnostic refusal. Downstream response logging
+only becomes meaningful after a target-compatible kernel read/write primitive
+exists and each subsequent stage has been independently validated.
+
+| Observable checkpoint | Current target result |
+|---|---|
+| Application support gate | `UNSUPPORTED_TARGET` before exploit selection |
+| Kernel exploit result | `NO_TARGET_COMPATIBLE_PRIMITIVE` |
+| Kernel patchfinder | `STATIC_PASS`; no runtime kernel context |
+| Titan iOS 26 guard | `DIAGNOSTIC_REFUSAL` before command-buffer setup |
+| RTBuddy/segment discovery | `READ_ONLY_PASS` from bounded capture |
+| GFX firmware patchfinder | `STATIC_PASS` on the extracted image |
+| GFX physical addresses and translation root | `NOT_RESOLVED_LIVE` |
+| Controlled mapping window | `NOT_ATTEMPTED` |
+| Titan `physwritebuf` publication | `NOT_REACHED` |
+| Dopamine physical read/write construction | `NOT_REACHED` |
+| SPTM/TXM protected operations | `NOT_REACHED` |
+
+The published SPTM/TXM architecture confirms a structured call contract rather
+than an arbitrary response channel. XNU wraps a TXM request in `txm_call_t`,
+passes it through `txm_kernel_call` and `txm_enter`, and SPTM dispatches it to a
+registered TXM handler. The request carries a selector and argument counts; the
+response is represented by `txm_ret`, `num_return_words`, and `return_words`.
+See [Modern iOS Security Features: A Deep Dive into SPTM, TXM, and
+Exclaves](https://arxiv.org/pdf/2510.09272), sections 8.3-8.4.
+
+This model gives future USB logs a precise schema, but does not expose a direct
+userspace interface. On the current target, no `txm_kernel_call` is reached, so
+all runtime response fields must remain absent and the trace must remain
+`NOT_REACHED`.
+
 ## Reproducible Diagnostic Build
 
 - Source branch: `codex/a15-ios26-diagnostic-20261014`
-- Source commit: `9009fd0ced07415d1693d110bb98b9bbe9d4c0f0`
-- GitHub Actions run: `38573660872` (successful, 2026-10-14)
-- Artifact: `Dopamine-A15-iOS26-diagnostic-9009fd0.ipa`
-- Size: `55,436,031` bytes
-- SHA-256: `ED6CCD193359C687946CFB1166BFC875B865A1144AD2F6A7E23E30922F448EA4`
+- Source commit: `f1795889667d74b1cac803510eb6bd713f58b1b3`
+- GitHub Actions run: `38581836254` (successful, 2026-10-14)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-f179588.ipa`
+- Size: `55,436,076` bytes
+- SHA-256: `9A4AE3E4737A7518D89CC742250EEAAEB6BE6E5BD9F531C408BDB233D78AD3BD`
 - Application version: `3.0.11` (`com.opa334.Dopamine`)
 
 The packaged Titan framework still declares support only for iOS `16.1` through
-`17.3.1`. Although its historical device-family list contains A15, the exact
+`17.3.1`. Its Info.plist and Mach-O `LC_BUILD_VERSION` both now declare a
+minimum deployment target of iOS `16.1`. Although its historical device-family list contains A15, the exact
 iPhone14,2 / iOS 26.0.1 target remains excluded and the app-side research guard
 returns unsupported before exploit selection or GPU command-buffer setup.
 

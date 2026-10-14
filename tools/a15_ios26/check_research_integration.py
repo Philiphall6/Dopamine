@@ -50,6 +50,7 @@ def main() -> int:
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/gfx_patchfinder.c"
     ).read_text()
     titan_analyzer = (ROOT / "tools/a15_ios26/analyze_titan.py").read_text()
+    response_trace = (ROOT / "tools/a15_ios26/build_response_trace.py").read_text()
     live_layout = json.loads(
         (ROOT / "tools/a15_ios26/live-layout-iphone14_2-23A355.json").read_text()
     )
@@ -140,6 +141,19 @@ def main() -> int:
         and "EXECUTABLE_IMAGE_OCCURRENCES_ONLY" in titan_analyzer
         and '"runtime_values_available": False' in titan_analyzer,
         "offline analyzer no longer scopes static RTKit markers away from live state",
+    )
+    require(
+        '"asserts_live_sptm_txm_response": False' in response_trace
+        and '"runtime_values": None' in response_trace
+        and '"runtime_values_status": "NOT_REACHED"' in response_trace,
+        "response trace can no longer distinguish its model from a live SPTM/TXM response",
+    )
+    require(
+        "txm_kernel_call" in response_trace
+        and "txm_enter" in response_trace
+        and "txm_ret" in response_trace
+        and "num_return_words" in response_trace,
+        "response trace is missing the published TXM call contract",
     )
 
     print(
