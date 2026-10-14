@@ -123,6 +123,23 @@ lines, and `Documents/a15-ios26-diagnostic.json`. It cannot instantiate the
 jailbreaker, initialize Titan command buffers, perform a physical write, or
 claim a live SPTM/TXM response.
 
+### On-device bounded diagnostic
+
+The diagnostic completed on the USB-connected iPhone14,2 running iOS 26.0.1
+build `23A355` on 2026-10-14. The report was pulled from the app container as
+`a15-ios26-diagnostic-device-20261014.json` and has SHA-256
+`AC467CFD44E2DE6BC07EF28962E4CA4980FCB4F70086F78CA31BAEFA740D2E3C`.
+
+The seven reported checkpoints match the expected bounded state:
+
+- `target.identity`, `environment.sptm`, and `titan.framework_metadata` are
+  `OBSERVED`.
+- `kernel.runtime_read_write` is `MISSING` because no target-compatible
+  primitive is available.
+- `titan.command_buffers` is `BLOCKED` by diagnostic mode.
+- `titan.physical_write` and `sptm_txm.runtime_response` are `NOT_REACHED`.
+- `diagnostic_only` is true and `asserts_live_sptm_txm_response` is false.
+
 The packaged Titan framework still declares support only for iOS `16.1` through
 `17.3.1`. Its Info.plist and Mach-O `LC_BUILD_VERSION` both now declare a
 minimum deployment target of iOS `16.1`. Although its historical device-family list contains A15, the exact
