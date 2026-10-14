@@ -1,0 +1,382 @@
+iOS 26 SPTM/TXM static compatibility report
+
+This report is diagnostic-only. Addresses are unslid virtual addresses
+from the extracted firmware images.
+
+## Result
+
+- TXM XPF relationships: PASS
+- SPTM-image XPF relationships: PASS
+- Kernel-side SPTM relationships: PASS
+- SPTM bypass primitive: NOT PROVIDED by this analysis
+
+## TXM
+
+- Image base: `0xfffffff017004000`
+- Anchor `/chosen/memory-map`: 2 occurrence(s), 1 code reference(s)
+- Anchor `research.com.apple.license-to-operate`: 1 occurrence(s), 1 code reference(s)
+
+### Trust cache path
+
+- `txm_deviceTreeTrustCacheRange`: 0xfffffff01702a6e0
+
+```asm
+  0xfffffff01702a6fc: ldrb      w9, [x8, #0x58]
+  0xfffffff01702a700: tbz       w9, #0, #0xfffffff01702a7e0
+  0xfffffff01702a704: stp       xzr, xzr, [sp, #0x10]
+  0xfffffff01702a708: str       wzr, [sp, #0xc]
+  0xfffffff01702a70c: add       x19, x8, #0x48
+  0xfffffff01702a710: adrp      x2, #0xfffffff017005000
+> 0xfffffff01702a714: add       x2, x2, #0xf1d
+  0xfffffff01702a718: add       x3, sp, #0x18
+  0xfffffff01702a71c: mov       x0, x19
+  0xfffffff01702a720: mov       x1, #0
+  0xfffffff01702a724: bl        #0xfffffff01704cefc
+  0xfffffff01702a728: cmp       w0, #1
+  0xfffffff01702a72c: b.ne      #0xfffffff01702a7a0
+  0xfffffff01702a730: ldr       x1, [sp, #0x18]
+  0xfffffff01702a734: adrp      x2, #0xfffffff017005000
+```
+- Candidate 1 call: `0xfffffff017025eac`
+- Candidate 1 root: `0xfffffff0170145b0`
+- Candidate 1 predecessor branches: none
+
+```asm
+  0xfffffff017025e6c: adrp      x9, #0xfffffff017070000
+  0xfffffff017025e70: add       x9, x9, #0x540
+  0xfffffff017025e74: str       xzr, [x9, #0x828]
+  0xfffffff017025e78: add       x9, x9, #0x828
+  0xfffffff017025e7c: str       x9, [x10, #0xc8]
+  0xfffffff017025e80: strb      w19, [x10, #0xb0]
+  0xfffffff017025e84: strb      w8, [x10, #0xb1]
+  0xfffffff017025e88: strb      wzr, [x10, #0xb2]
+  0xfffffff017025e8c: adrp      x8, #0xfffffff01701d000
+  0xfffffff017025e90: add       x8, x8, #0xac8
+  0xfffffff017025e94: str       x8, [x10, #0xa8]
+  0xfffffff017025e98: adrp      x16, #0xfffffff017026000
+  0xfffffff017025e9c: add       x16, x16, #0x164
+  0xfffffff017025ea0: mov       x17, #0x307a
+  0xfffffff017025ea4: pacia     x16, x17
+  0xfffffff017025ea8: str       x16, [x10, #0xd0]
+> 0xfffffff017025eac: bl        #0xfffffff01702a6e0
+  0xfffffff017025eb0: cbz       x0, #0xfffffff0170260d4
+  0xfffffff017025eb4: mov       x20, x1
+  0xfffffff017025eb8: cbz       x1, #0xfffffff0170260e0
+  0xfffffff017025ebc: cmp       x20, #3
+  0xfffffff017025ec0: b.ls      #0xfffffff017026154
+```
+
+### Developer mode path
+
+- Candidate 1: `0xfffffff017070e94` from LDRB `0xfffffff017023570`
+
+```asm
+  0xfffffff017023550: mov       w0, #0x19
+  0xfffffff017023554: bl        #0xfffffff017029a64
+  0xfffffff017023558: pacibsp   
+  0xfffffff01702355c: stp       x20, x19, [sp, #-0x20]!
+  0xfffffff017023560: stp       x29, x30, [sp, #0x10]
+  0xfffffff017023564: add       x29, sp, #0x10
+  0xfffffff017023568: adrp      x8, #0xfffffff017070000
+  0xfffffff01702356c: add       x8, x8, #0xe90
+  0xfffffff017023570: ldrb      w8, [x8, #4]
+  0xfffffff017023574: tbz       w8, #0, #0xfffffff017023608
+  0xfffffff017023578: mov       x19, x0
+  0xfffffff01702357c: adrp      x1, #0xfffffff017004000
+> 0xfffffff017023580: add       x1, x1, #0xde1
+  0xfffffff017023584: mov       x0, #0
+  0xfffffff017023588: mov       x2, #0
+  0xfffffff01702358c: bl        #0xfffffff017022a30
+  0xfffffff017023590: mov       x20, x0
+  0xfffffff017023594: mov       x0, x19
+  0xfffffff017023598: mov       w1, #0
+  0xfffffff01702359c: mov       w2, #0
+  0xfffffff0170235a0: bl        #0xfffffff017027064
+```
+
+## SPTM
+
+- Image base: `0xfffffff027004000`
+- Anchor `papt_ranges_update`: 1 occurrence(s), 1 reference(s), functions `0xfffffff0270c1b5c`
+
+```asm
+  0xfffffff0270c1f48: b.eq      #0xfffffff0270c1f50
+  0xfffffff0270c1f4c: movk      x0, #0xc8a2, lsl #48
+  0xfffffff0270c1f50: stp       x2, x1, [x0]
+  0xfffffff0270c1f54: str       w17, [x0, #0x10]
+  0xfffffff0270c1f58: b         #0xfffffff0270c1cf0
+  0xfffffff0270c1f5c: adrp      x8, #0xfffffff02700f000
+> 0xfffffff0270c1f60: add       x8, x8, #0x3b8
+  0xfffffff0270c1f64: str       x8, [sp]
+  0xfffffff0270c1f68: adrp      x0, #0xfffffff02700f000
+  0xfffffff0270c1f6c: add       x0, x0, #0x38d
+  0xfffffff0270c1f70: bl        #0xfffffff0270dbbf8
+  0xfffffff0270c1f74: bti       c
+  0xfffffff0270c1f78: ldr       w8, [x1, #0x10]
+  0xfffffff0270c1f7c: ldr       w9, [x0, #0x10]
+  0xfffffff0270c1f80: cmp       w9, w8
+```
+
+### Compressed PAPT tables
+
+- `n_papt_ranges_compressed`: 0xfffffff0270e19d8
+- `papt_ranges_compressed`: 0xfffffff0270e19e0
+- Finder range: `0xfffffff0270c1c90` to `0xfffffff0270c1cac`
+
+```asm
+  0xfffffff0270c1c88: b         #0xfffffff0270c1bf8
+  0xfffffff0270c1c8c: add       w8, w10, #1
+> 0xfffffff0270c1c90: adrp      x9, #0xfffffff0270e1000
+  0xfffffff0270c1c94: str       w8, [x9, #0x9d8]
+  0xfffffff0270c1c98: mov       w1, w8
+  0xfffffff0270c1c9c: adrp      x0, #0xfffffff0270e1000
+```
+
+```asm
+  0xfffffff0270c1c94: str       w8, [x9, #0x9d8]
+  0xfffffff0270c1c98: mov       w1, w8
+> 0xfffffff0270c1c9c: adrp      x0, #0xfffffff0270e1000
+  0xfffffff0270c1ca0: add       x0, x0, #0x9e0
+  0xfffffff0270c1ca4: adrp      x16, #0xfffffff0270c1000
+  0xfffffff0270c1ca8: add       x16, x16, #0xf74
+```
+
+### Related referenced strings
+
+- `target_papt_start` at `0xfffffff0270060e0`; references: `0xfffffff0270a56c0`, `0xfffffff0270a56e0`, `0xfffffff0270a5700`, `0xfffffff0270a5744`
+- `%s: Number of supported PAPT ranges has been exhausted` at `0xfffffff0270060f2`; references: `0xfffffff0270a5594`
+- `validate_papt_address_range` at `0xfffffff02700640e`; references: `0xfffffff0270a564c`
+- `t8110dart_carveout_phys_to_papt` at `0xfffffff02700a8e2`; references: `0xfffffff0270be37c`
+- `%s: dart %p (%s:%u): Unable to convert secure carveout physical address %llx to a PAPT` at `0xfffffff02700a902`; references: `0xfffffff0270be38c`
+- `%s: DeviceTree PAPT range not found.` at `0xfffffff02700e4a2`; references: `0xfffffff0270bec70`
+- `papt_update_mapping` at `0xfffffff02700eb10`; references: `0xfffffff0270bf8f0`, `0xfffffff0270bf908`, `0xfffffff0270bf938`, `0xfffffff0270bf950`
+- `%s: invalid flag found while updating PAPT mapping %u` at `0xfffffff02700eb24`; references: `0xfffffff0270bf914`
+- `%s: Attempted to update PAPT permissions outside of a retype() operation, this is unsafe.` at `0xfffffff02700eb5a`; references: `0xfffffff0270bf944`
+- `%s: invalid cache attribute index found while updating PAPT mapping %p %hhuu %hhu` at `0xfffffff02700ebb4`; references: `0xfffffff0270bf960`
+- `%s: wrong frame type for SPTM CTRR protected page tables: %d` at `0xfffffff02700efee`; references: `0xfffffff0270c1394`
+- `%s: wrong frame type for page tables: %d` at `0xfffffff02700f048`; references: `0xfffffff0270c13cc`
+- `%s: PAPT PTE could not be reached %p` at `0xfffffff02700f071`; references: `0xfffffff0270c09d8`, `0xfffffff0270c15bc`, `0xfffffff0270c6f88`, `0xfffffff0270c7134`
+- `bootstrap_register_papt_range` at `0xfffffff02700f20d`; references: `0xfffffff0270c1988`, `0xfffffff0270c19a0`, `0xfffffff0270c19bc`, `0xfffffff0270c19d4`, `0xfffffff0270c19ec`
+- `%s: (range %s): Required PAPT range has no mappings.` at `0xfffffff02700f22b`; references: `0xfffffff0270c19f8`
+- `%s: (range %s): Attempted to go over the maximum number of PAPT ranges` at `0xfffffff02700f28a`; references: `0xfffffff0270c19c8`
+- `%s: (range %s): PAPT_RANGE_ALLOCATE_BACKWARD cannot coexist with other flags` at `0xfffffff02700f2d1`; references: `0xfffffff0270c19e0`
+- `bootstrap_retype_papt_range` at `0xfffffff02700f31e`; references: `0xfffffff0270c1b18`, `0xfffffff0270c1b30`, `0xfffffff0270c1b48`
+- `%s: %s PAPT range not found.` at `0xfffffff02700f360`; references: `0xfffffff0270a81d4`, `0xfffffff0270c6d40`, `0xfffffff0270cb850`, `0xfffffff0270cbac4`
+- `papt_range_find` at `0xfffffff02700f37d`; references: `0xfffffff0270a81c8`, `0xfffffff0270c6d34`, `0xfffffff0270cb844`, `0xfffffff0270cbab8`
+- `%s: () No PAPT ranges have been registered` at `0xfffffff02700f38d`; references: `0xfffffff0270c1f6c`
+- `papt_ranges_update` at `0xfffffff02700f3b8`; references: `0xfffffff0270c1f60`
+- `%s: PAPT range is in multiple SPTM domains` at `0xfffffff02700f624`; references: `0xfffffff0270c3b74`
+- `%s: [current_contiguous] set on the first PAPT range` at `0xfffffff02700f64f`; references: `0xfffffff0270c3be0`
+- `%s: Two or more PAPT ranges overlap in VA space %s` at `0xfffffff02700f684`; references: `0xfffffff0270c3b90`
+- `%s: papt_to_phys(0) encountered.` at `0xfffffff02700f88d`; references: `0xfffffff0270c0b84`
+- `papt_to_phys` at `0xfffffff02700f8ae`; references: `0xfffffff0270c0b78`, `0xfffffff0270c0ba8`
+- `%s: No valid PAPT mapping found while traversing the page tables` at `0xfffffff02700f8bb`; references: `0xfffffff0270c0bb4`
+- `io_range_get_papt` at `0xfffffff027010377`; references: `0xfffffff0270c9a94`, `0xfffffff0270c9ab0`
+- `%s: IO PADDR does not have an associated PAPT address %p %d` at `0xfffffff027010389`; references: `0xfffffff0270c9ac0`
+- `sptm_first_phys` at `0xfffffff027013e3f`; references: `0xfffffff0270aa3d4`, `0xfffffff0270ab514`, `0xfffffff0270ad53c`, `0xfffffff0270ad5b4`, `0xfffffff0270af678`, `0xfffffff0270b0a40`, `0xfffffff0270b74f8`, `0xfffffff0270d2950`, `0xfffffff0270d37ec`, `0xfffffff0270d3d7c`, `0xfffffff0270d4078`, `0xfffffff0270d59a0`, `0xfffffff0270d7038`, `0xfffffff0270d75e0`, `0xfffffff0270d7620`, `0xfffffff0270d7aac`, `0xfffffff0270d7b64`, `0xfffffff0270d9e28`, `0xfffffff0270dabe4`, `0xfffffff0270dafec`, `0xfffffff0270db014`, `0xfffffff0270db034`
+- `sptm_last_phys` at `0xfffffff027013e4f`; references: `0xfffffff0270aa3cc`, `0xfffffff0270ab50c`, `0xfffffff0270ad534`, `0xfffffff0270ad5ac`, `0xfffffff0270af670`, `0xfffffff0270b0a38`, `0xfffffff0270b74f0`, `0xfffffff0270d2948`, `0xfffffff0270d37e4`, `0xfffffff0270d3d74`, `0xfffffff0270d4070`, `0xfffffff0270d5998`, `0xfffffff0270d7030`, `0xfffffff0270d75d8`, `0xfffffff0270d7618`, `0xfffffff0270d7aa4`, `0xfffffff0270d7b5c`, `0xfffffff0270d9e20`, `0xfffffff0270dabdc`, `0xfffffff0270dafe4`, `0xfffffff0270db00c`, `0xfffffff0270db02c`
+- `sptm_update_papt` at `0xfffffff027014349`; references: `0xfffffff0270d7b24`
+
+## Kernel-side SPTM anchors
+
+- Fileset: `com.apple.kernel`
+- Image base: `0xfffffff00700c000`
+- Anchor `Debug Header address: %p`: 1 occurrence(s), 1 reference(s)
+- Anchor `sptm_get_page_table_refcnt`: 1 occurrence(s), 5 reference(s)
+- Anchor `wfe_events_sec`: 1 occurrence(s), 1 reference(s)
+- Anchor `%s: unexpected pmap_enter_pv ret code: %d. new_pve_p=%p pmap=%p @%s:%d`: 1 occurrence(s), 1 reference(s)
+- Anchor `pv_alloc`: 1 occurrence(s), 2 reference(s)
+
+### Page-table refcount helper
+
+- `sptm_get_page_table_refcnt`: 0xfffffff0087b2c0c
+
+```asm
+  0xfffffff00810865c: mov       x8, #-1
+  0xfffffff008108660: str       x8, [x26, #8]
+  0xfffffff008108664: str       xzr, [sp, #0x48]
+  0xfffffff008108668: add       x1, sp, #0x48
+  0xfffffff00810866c: mov       x0, x21
+  0xfffffff008108670: bl        #0xfffffff0087c92dc
+  0xfffffff008108674: cbnz      w0, #0xfffffff008108968
+  0xfffffff008108678: ldr       x22, [sp, #0x48]
+  0xfffffff00810867c: strh      wzr, [sp, #0x48]
+  0xfffffff008108680: add       x1, sp, #0x48
+  0xfffffff008108684: mov       x0, x22
+  0xfffffff008108688: bl        #0xfffffff0087b2c0c
+> 0xfffffff00810868c: cbnz      w0, #0xfffffff008108a00
+  0xfffffff008108690: ldrh      w8, [sp, #0x48]
+  0xfffffff008108694: cbnz      w8, #0xfffffff008108988
+  0xfffffff008108698: ands      x22, x21, #-0x4000
+  0xfffffff00810869c: b.eq      #0xfffffff00810892c
+  0xfffffff0081086a0: str       xzr, [sp, #0x48]
+  0xfffffff0081086a4: add       x1, sp, #0x48
+  0xfffffff0081086a8: mov       x0, x22
+  0xfffffff0081086ac: bl        #0xfffffff0087c92dc
+```
+
+### Refcount-dependent globals
+
+- `vm_first_phys`: 0xfffffff007af0760
+- `vm_last_phys`: 0xfffffff007af0768
+- `libsptm_frame_table`: 0xfffffff007af0788
+- `libsptm_frame_type_params`: 0xfffffff007af0790
+- `sptm_frame_type_descriptor.struct_size`: 96
+
+```asm
+> 0xfffffff0087b2c0c: bti       c
+  0xfffffff0087b2c10: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b2c14: ldrb      w8, [x8, #0x748]
+  0xfffffff0087b2c18: tbz       w8, #0, #0xfffffff0087b2cc8
+  0xfffffff0087b2c1c: cbz       x1, #0xfffffff0087b2cd0
+  0xfffffff0087b2c20: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b2c24: ldr       x8, [x8, #0x760]
+  0xfffffff0087b2c28: adrp      x9, #0xfffffff007af0000
+  0xfffffff0087b2c2c: ldr       x9, [x9, #0x768]
+  0xfffffff0087b2c30: subs      x8, x0, x8
+  0xfffffff0087b2c34: ccmp      x9, x0, #0, hs
+  0xfffffff0087b2c38: b.hi      #0xfffffff0087b2cd8
+  0xfffffff0087b2c3c: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b2c40: ldr       w8, [x8, #0x7a8]
+  0xfffffff0087b2c44: cbz       w8, #0xfffffff0087b2d30
+  0xfffffff0087b2c48: sub       w9, w8, #1
+  0xfffffff0087b2c4c: lsr       x10, x0, #0xe
+  0xfffffff0087b2c50: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b2c54: ldr       x11, [x8, #0x7b0]
+  0xfffffff0087b2c58: lsr       w12, w9, #1
+  0xfffffff0087b2c5c: add       x8, x11, w12, uxtw #4
+  0xfffffff0087b2c60: ldp       w14, w13, [x8, #8]
+  0xfffffff0087b2c64: and       w13, w13, #0xffffff
+  0xfffffff0087b2c68: add       w15, w13, w14
+  0xfffffff0087b2c6c: cmp       w15, w10
+  0xfffffff0087b2c70: cset      w13, hi
+  0xfffffff0087b2c74: cmp       w14, w10
+  0xfffffff0087b2c78: ccmp      w15, w10, #0, ls
+  0xfffffff0087b2c7c: b.hi      #0xfffffff0087b2d00
+  0xfffffff0087b2c80: mov       w14, #0
+  0xfffffff0087b2c84: cmp       w14, w9
+  0xfffffff0087b2c88: b.eq      #0xfffffff0087b2d30
+  0xfffffff0087b2c8c: tst       w13, #1
+  0xfffffff0087b2c90: csel      w9, w12, w9, ne
+  0xfffffff0087b2c94: csinc     w14, w14, w12, ne
+  0xfffffff0087b2c98: add       w8, w9, w14
+  0xfffffff0087b2c9c: lsr       w12, w8, #1
+  0xfffffff0087b2ca0: add       x8, x11, w12, uxtw #4
+  0xfffffff0087b2ca4: ldp       w15, w13, [x8, #8]
+  0xfffffff0087b2ca8: and       w13, w13, #0xffffff
+  0xfffffff0087b2cac: add       w16, w13, w15
+  0xfffffff0087b2cb0: cmp       w16, w10
+  0xfffffff0087b2cb4: cset      w13, hi
+  0xfffffff0087b2cb8: cmp       w15, w10
+  0xfffffff0087b2cbc: ccmp      w16, w10, #0, ls
+  0xfffffff0087b2cc0: b.ls      #0xfffffff0087b2c84
+  0xfffffff0087b2cc4: b         #0xfffffff0087b2d00
+  0xfffffff0087b2cc8: mov       w0, #1
+  0xfffffff0087b2ccc: ret       
+  0xfffffff0087b2cd0: mov       w0, #2
+  0xfffffff0087b2cd4: ret       
+  0xfffffff0087b2cd8: adrp      x9, #0xfffffff007af0000
+  0xfffffff0087b2cdc: ldr       x9, [x9, #0x788]
+  0xfffffff0087b2ce0: lsr       x8, x8, #0xa
+  0xfffffff0087b2ce4: and       x10, x8, #0x3ffffffffffff0
+  0xfffffff0087b2ce8: add       x8, x9, x10
+  0xfffffff0087b2cec: eor       x16, x9, x8
+  0xfffffff0087b2cf0: tst       x16, #-0x40000000000000
+  0xfffffff0087b2cf4: b.eq      #0xfffffff0087b2cfc
+  0xfffffff0087b2cf8: movk      x8, #0xc8a2, lsl #48
+  0xfffffff0087b2cfc: cbz       x9, #0xfffffff0087b2d30
+  0xfffffff0087b2d00: ldrb      w9, [x8, #2]
+  0xfffffff0087b2d04: adrp      x10, #0xfffffff007af0000
+  0xfffffff0087b2d08: ldr       x10, [x10, #0x790]
+  0xfffffff0087b2d0c: mov       w11, #0x60
+  0xfffffff0087b2d10: umaddl    x9, w9, w11, x10
+  0xfffffff0087b2d14: ldrb      w9, [x9, #1]
+  0xfffffff0087b2d18: cmp       w9, #1
+  0xfffffff0087b2d1c: b.eq      #0xfffffff0087b2d38
+  0xfffffff0087b2d20: cmp       w9, #2
+  0xfffffff0087b2d24: b.ne      #0xfffffff0087b2d50
+  0xfffffff0087b2d28: mov       w9, #8
+  0xfffffff0087b2d2c: b         #0xfffffff0087b2d3c
+```
+
+### libsptm initialization anchor
+
+- `wfe_timeout_configure`: 0xfffffff008128444
+
+```asm
+  0xfffffff008128454: str       xzr, [sp, #8]
+  0xfffffff008128458: adrp      x8, #0xfffffff007aef000
+  0xfffffff00812845c: add       x8, x8, #0xa40
+  0xfffffff008128460: ldr       x8, [x8, #0xa0]
+  0xfffffff008128464: add       x0, x8, #0x6c
+  0xfffffff008128468: adrp      x1, #0xfffffff007055000
+> 0xfffffff00812846c: add       x1, x1, #0xdcd
+  0xfffffff008128470: add       x2, sp, #8
+  0xfffffff008128474: mov       w3, #8
+  0xfffffff008128478: mov       w4, #0
+  0xfffffff00812847c: bl        #0xfffffff008789e58
+  0xfffffff008128480: cbz       w0, #0xfffffff0081284a4
+  0xfffffff008128484: ldr       x8, [sp, #8]
+  0xfffffff008128488: mov       w9, #0x4240
+  0xfffffff00812848c: movk      w9, #0xf, lsl #16
+```
+- `libsptm_init`: 0xfffffff0087b2570
+- `libsptm_n_papt_ranges`: 0xfffffff007af0750
+- `libsptm_papt_ranges`: 0xfffffff007af0758
+
+```asm
+> 0xfffffff0087b2570: bti       c
+  0xfffffff0087b2574: cbz       x0, #0xfffffff0087b26f0
+  0xfffffff0087b2578: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b257c: ldp       x9, x10, [x0, #8]
+  0xfffffff0087b2580: str       x9, [x8, #0x750]
+  0xfffffff0087b2584: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b2588: str       x10, [x8, #0x758]
+  0xfffffff0087b258c: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b2590: ldp       x9, x10, [x0, #0x18]
+  0xfffffff0087b2594: str       x9, [x8, #0x760]
+  0xfffffff0087b2598: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b259c: str       x10, [x8, #0x768]
+  0xfffffff0087b25a0: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b25a4: ldp       x9, x10, [x0, #0x28]
+  0xfffffff0087b25a8: str       x9, [x8, #0x770]
+  0xfffffff0087b25ac: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b25b0: str       x10, [x8, #0x778]
+  0xfffffff0087b25b4: adrp      x8, #0xfffffff007af0000
+  0xfffffff0087b25b8: ldp       x9, x10, [x0, #0x38]
+  0xfffffff0087b25bc: str       x9, [x8, #0x780]
+  0xfffffff0087b25c0: adrp      x8, #0xfffffff007af0000
+```
+
+### SPTM argument block
+
+- `SPTMArgs`: 0xfffffff007aefa28
+
+```asm
+  0xfffffff007fcba48: mov       x1, x0
+  0xfffffff007fcba4c: adrp      x0, #0xfffffff00aaa0000
+  0xfffffff007fcba50: add       x0, x0, #0x5e8
+  0xfffffff007fcba54: mov       w2, #0x40
+  0xfffffff007fcba58: b         #0xfffffff0080ec624
+  0xfffffff007fcba5c: pacibsp   
+  0xfffffff007fcba60: sub       sp, sp, #0x70
+  0xfffffff007fcba64: stp       x22, x21, [sp, #0x40]
+  0xfffffff007fcba68: stp       x20, x19, [sp, #0x50]
+  0xfffffff007fcba6c: stp       x29, x30, [sp, #0x60]
+  0xfffffff007fcba70: add       x29, sp, #0x60
+  0xfffffff007fcba74: adrp      x8, #0xfffffff00aa47000
+  0xfffffff007fcba78: add       x8, x8, #0
+  0xfffffff007fcba7c: ldr       x8, [x8]
+  0xfffffff007fcba80: stur      x8, [x29, #-0x28]
+  0xfffffff007fcba84: adrp      x8, #0xfffffff007aef000
+  0xfffffff007fcba88: ldr       x8, [x8, #0xa28]
+  0xfffffff007fcba8c: ldr       x19, [x8, #0x60]
+  0xfffffff007fcba90: str       x19, [sp]
+  0xfffffff007fcba94: adrp      x0, #0xfffffff007043000
+> 0xfffffff007fcba98: add       x0, x0, #0xb83
+  0xfffffff007fcba9c: bl        #0xfffffff007fed3b4
+  0xfffffff007fcbaa0: cbz       x19, #0xfffffff007fcbc2c
+  0xfffffff007fcbaa4: ldr       w8, [x19, #8]
+  0xfffffff007fcbaa8: str       x8, [sp]
+  0xfffffff007fcbaac: adrp      x0, #0xfffffff007043000
+```
