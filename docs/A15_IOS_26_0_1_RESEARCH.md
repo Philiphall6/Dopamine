@@ -109,12 +109,19 @@ all runtime response fields must remain absent and the trace must remain
 ## Reproducible Diagnostic Build
 
 - Source branch: `codex/a15-ios26-diagnostic-20261014`
-- Source commit: `f1795889667d74b1cac803510eb6bd713f58b1b3`
-- GitHub Actions run: `38581836254` (successful, 2026-10-14)
-- Artifact: `Dopamine-A15-iOS26-diagnostic-f179588.ipa`
-- Size: `55,436,076` bytes
-- SHA-256: `9A4AE3E4737A7518D89CC742250EEAAEB6BE6E5BD9F531C408BDB233D78AD3BD`
+- Source commit: `0feb27f04c8a30e21f3690e352472c958bc8fddd`
+- GitHub Actions run: `38585285602` (successful, 2026-10-14)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-0feb27f.ipa`
+- Size: `55,438,216` bytes
+- SHA-256: `07C9A94BB27BB1C89E083EF0159978A4FCD56BBF47F99E50D83535128929935F`
 - Application version: `3.0.11` (`com.opa334.Dopamine`)
+
+On the exact iPhone14,2 / iOS 26.0.1 research target, this build replaces the
+disabled main action with `Lancer le diagnostic`. That bounded action records
+target and packaged-Titan observations in the UI, USB-visible `[A15DIAG]` log
+lines, and `Documents/a15-ios26-diagnostic.json`. It cannot instantiate the
+jailbreaker, initialize Titan command buffers, perform a physical write, or
+claim a live SPTM/TXM response.
 
 The packaged Titan framework still declares support only for iOS `16.1` through
 `17.3.1`. Its Info.plist and Mach-O `LC_BUILD_VERSION` both now declare a
