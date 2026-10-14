@@ -81,6 +81,10 @@ GPU memory behavior, MMIO access, or a physical-write primitive.
   marker occurrence in `__TEXT` at `0xffffff8000000990`. The surrounding bytes
   belong to the executable image, not the live reset-vector structure, so an
   offline or VM scan cannot recover `gfx_data_pa` or `gfx_ttbr_pa` from it.
+- The exact `gfx-asc` DeviceTree node contains only the `0x06400000/0x6c000`
+  register range and the `0x06050000/0x8` IORVBAR range. Its RTBuddy nub adds
+  firmware and power-management metadata, but neither node contains a reset
+  vector, a GFX data physical address, or a GFX page-table base.
 - The observations used for this work were bounded and read-only. No kernel
   write, GPU command queue, direct physical write, or MMIO access was used.
 
