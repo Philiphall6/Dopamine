@@ -82,6 +82,14 @@ def main() -> int:
         "fAddress == 0 || fAddress > 0x100" in kernel_patchfinder,
         "legacy IOMemoryMap offset candidates are no longer range-checked",
     )
+    require(
+        "kpf_fileset_entry_patchfind_text_unique" in kernel_patchfinder,
+        "iOS 26 AGX anchors are no longer required to be unique",
+    )
+    require(
+        "AGX fence layout disagrees with processKernelCommand" in kernel_patchfinder,
+        "iOS 26 AGX cross-method layout validation is missing",
+    )
 
     print(
         "OK: A15/iOS 26.0.1 remains diagnostic-only; "

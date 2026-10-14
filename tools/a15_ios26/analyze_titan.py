@@ -581,6 +581,7 @@ def analyze_ios26_agx_candidates(agx: MappedImage) -> dict:
     nested_offset = decode_move_wide(agx.read_u32(hit + 0x2C))
     if nested_offset is not None:
         nested_offset = decode_move_wide(agx.read_u32(hit + 0x30), nested_offset)
+    slot_map_offset = decode_ldr_str_offset(agx.read_u32(hit + 0x38))
 
     marker = None
     buffer_offset = None
@@ -597,11 +598,18 @@ def analyze_ios26_agx_candidates(agx: MappedImage) -> dict:
         "intermediate_load": intermediate_load,
         "intermediate_offset": intermediate_offset,
         "nested_slot_offset": nested_offset,
+        "slot_map_offset": slot_map_offset,
         "buffer_marker": marker,
         "helper.buffer_offset": buffer_offset,
         **command,
     }
-    if not command_valid:
+    cross_valid = (
+        nested_offset == command["IOGPUState.memory_map_slot"]
+        and slot_map_offset == command["IOGPUMapSlot.memory_map"]
+        and buffer_offset == command["IOGPUState.buffer_offset"]
+    )
+    result["cross_method_validation"] = "PASS" if cross_valid else "FAIL"
+    if not command_valid or not cross_valid:
         result["status"] = "AMBIGUOUS"
     return result
 
@@ -1091,6 +1099,10 @@ def render_markdown(report: dict) -> str:
     )
     if candidate.get("derived"):
         lines.append(format_derived(candidate["derived"]))
+        lines.append(
+            "Cross-method nested-layout validation: "
+            f"**{candidate.get('cross_method_validation', 'NOT_RUN')}**."
+        )
     for item in gfx["slices"]:
         lines.extend(
             [

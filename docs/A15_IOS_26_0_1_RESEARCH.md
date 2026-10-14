@@ -81,6 +81,10 @@ jailbreak path on this exact device and OS combination.
 - The current working tree contains guarded iOS 26 parsing work for Titan,
   including nested AGX fence-layout decoding, IOMachPort object discovery, and
   the two-argument hibernation call shape.
+- The iOS 26 AGX command and relaxed-fence anchors are unique in the inspected
+  `AGXG14P` fileset. The in-app fallback now requires that uniqueness and
+  cross-validates the independently decoded nested slot (`0x152a0`), map
+  (`0x50`), and buffer (`0x498`) offsets before accepting the layout.
 - The in-app legacy `IOMemoryMap::wireRange` finder now rejects zero or
   implausibly large field offsets, so the target's false `+0x260` match cannot
   silently enter Titan's offset table.
