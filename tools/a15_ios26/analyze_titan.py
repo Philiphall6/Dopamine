@@ -1342,7 +1342,8 @@ def render_markdown(report: dict) -> str:
                         f"`segment-names`: key index "
                         f"`{segment_names.get('key_index', 'unknown')}`, length "
                         f"`{segment_names.get('length', 'unknown')}`, content "
-                        f"**{segment_names.get('content_status', 'UNKNOWN')}**.",
+                        f"**{segment_names.get('content_status', 'UNKNOWN')}**; inference "
+                        f"**{segment_names.get('inference_status', 'UNKNOWN')}**.",
                         f"`segment-ranges`: key index "
                         f"`{segment_ranges.get('key_index', 'unknown')}`, length "
                         f"`{segment_ranges.get('length', 'unknown')}`, descriptor size "
@@ -1356,16 +1357,16 @@ def render_markdown(report: dict) -> str:
                     lines.extend(
                         [
                             "",
-                            "| Index | Field +0x00 | Field +0x08 | Field +0x10 | Length | Raw flags |",
+                            "| Index | Physical +0x00 | Virtual +0x08 | Remap +0x10 | Length | Raw flags |",
                             "|---:|---:|---:|---:|---:|---:|",
                         ]
                     )
                     for descriptor in segment_descriptors:
                         lines.append(
                             f"| `{descriptor.get('index', 'unknown')}` | "
-                            f"`{descriptor.get('field_00', 'unknown')}` | "
-                            f"`{descriptor.get('field_08', 'unknown')}` | "
-                            f"`{descriptor.get('field_10', 'unknown')}` | "
+                            f"`{descriptor.get('physical', descriptor.get('field_00', 'unknown'))}` | "
+                            f"`{descriptor.get('virtual', descriptor.get('field_08', 'unknown'))}` | "
+                            f"`{descriptor.get('remap', descriptor.get('field_10', 'unknown'))}` | "
                             f"`{descriptor.get('length', 'unknown')}` | "
                             f"`{descriptor.get('flags_raw', 'unknown')}` |"
                         )

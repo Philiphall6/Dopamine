@@ -66,7 +66,12 @@
         "key": "segment-names",
         "length": "0xe",
         "metadata_status": "VALIDATED",
-        "content_status": "NOT_CAPTURED_CONNECTION_CLOSED"
+        "content_status": "NOT_CAPTURED_CONNECTION_CLOSED",
+        "inferred_content": [
+          "__TEXT",
+          "__DATA"
+        ],
+        "inference_status": "FORMAT_AND_LENGTH_MATCH_COMPARATIVE_DEVICETREE_NOT_LIVE_PROVEN"
       },
       "segment_ranges": {
         "key_index": 14,
@@ -82,6 +87,9 @@
             "field_00": "0x8007ac000",
             "field_08": "0xffffff8000000000",
             "field_10": "0x8007ac000",
+            "physical": "0x8007ac000",
+            "virtual": "0xffffff8000000000",
+            "remap": "0x8007ac000",
             "length": "0x5c000",
             "flags_raw": "0x1",
             "flags_normalized": "0x2"
@@ -91,12 +99,38 @@
             "field_00": "0x802048000",
             "field_08": "0xffffff800005c000",
             "field_10": "0x802048000",
+            "physical": "0x802048000",
+            "virtual": "0xffffff800005c000",
+            "remap": "0x802048000",
             "length": "0xd8000",
             "flags_raw": "0x0",
             "flags_normalized": "0x2"
           }
         ],
-        "semantic_status": "STRUCTURE_VALIDATED_FIELD_ROLES_UNRESOLVED"
+        "field_roles": {
+          "field_00": "physical",
+          "field_08": "virtual",
+          "field_10": "remap",
+          "field_18_low32": "length",
+          "field_18_high32": "flags"
+        },
+        "object_field_mapping": {
+          "physical": "+0x18",
+          "remap": "+0x20",
+          "virtual": "+0x28",
+          "length": "+0x30",
+          "normalized_flags": "+0x40"
+        },
+        "physical_descriptor_method": "0xfffffff00a506234",
+        "remap_range_methods": [
+          "0xfffffff00a506298",
+          "0xfffffff00a506308"
+        ],
+        "virtual_range_methods": [
+          "0xfffffff00a5062d0",
+          "0xfffffff00a506334"
+        ],
+        "semantic_status": "FIELD_ROLES_RESOLVED_STATIC_AND_COMPARATIVE"
       },
       "probe_guardrail": "The ranges payload was read only after its OSData length was validated as 0x40, and the read stopped exactly at 64 bytes. The exact 14-byte names-payload attempt closed the connection before producing a capture, so it was not retried. The probe configuration was restored to disabled over USB after every attempt."
     },

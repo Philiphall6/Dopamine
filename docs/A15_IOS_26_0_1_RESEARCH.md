@@ -76,11 +76,23 @@ GPU memory behavior, MMIO access, or a physical-write primitive.
   - descriptor 1: `+0x00=0x802048000`,
     `+0x08=0xffffff800005c000`, `+0x10=0x802048000`,
     `length=0xd8000`, raw flags `0x0`.
-- `RTBuddy` passes those fields to factory `0xfffffff00a505df0`, which stores
-  them at object offsets `+0x18`, `+0x28`, `+0x20`, and `+0x30`
-  respectively, with transformed flags at `+0x40`. This proves the structure
-  and lengths, but the semantic names of the three address fields remain
-  unresolved.
+- `RTBuddy` loads each raw descriptor as physical address at `+0x00`, virtual
+  address at `+0x08`, remap address at `+0x10`, 32-bit length at `+0x18`, and
+  32-bit flags at `+0x1c`. It deliberately reorders the three address arguments
+  before calling factory `0xfffffff00a505df0`, which stores physical at object
+  offset `+0x18`, remap at `+0x20`, virtual at `+0x28`, length at `+0x30`, and
+  transformed flags at `+0x40`.
+- Target-kernel method `0xfffffff00a506234` passes object fields `+0x18` and
+  `+0x30` to the physical-memory-descriptor factory at
+  `0xfffffff0086e9dfc`. Methods `0xfffffff00a506298` and
+  `0xfffffff00a506308` perform range checks against remap base `+0x20`, while
+  methods `0xfffffff00a5062d0` and `0xfffffff00a506334` perform the matching
+  checks against virtual base `+0x28`.
+- This field order also matches a
+  [comparative T8030 DeviceTree dump](https://gist.github.com/bazad/1faef1a6fe396b820a43170b43e38be1)
+  that labels the same 32-byte format as `phys`, `virt`, `remap`, `size`, and
+  `flags`. That external sample is corroborating format evidence, not
+  target-device evidence.
 - The `IODeviceMemory` value is an `OSArray` with exactly two elements. Static
   kernel analysis identifies both elements as `IOGeneralMemoryDescriptor`
   objects.
@@ -170,10 +182,11 @@ physical-write primitive and must not be interpreted as exploit support.
   proven.
 - The remaining target-specific AGX relationships may replace legacy Titan
   patterns that no longer match this kernel and GFX firmware.
-- The two live `segment-ranges` descriptors may describe the RTKit firmware
-  segments needed by later diagnostic reasoning, but their three address-field
-  roles and the corresponding 14-byte `segment-names` payload are not yet
-  proven.
+- The two live `segment-ranges` descriptors describe physical, virtual, and
+  remap ranges for two RTKit firmware segments. The uncaptured 14-byte
+  `segment-names` payload is strongly inferred as `__TEXT\0__DATA\0` from the
+  exact length, descriptor count, and comparative DeviceTree format, but it is
+  not recorded as a live-proven value.
 
 None of these hypotheses is permission to invoke mapping methods, dereference
 MMIO, create a GPU command queue, or perform a write.
@@ -201,9 +214,8 @@ Consequences:
 
 1. Validate the target-specific `IOMemoryMap` accessor anchor against
    additional iOS 26 kernels before treating it as a family-wide finder.
-2. Resolve the three address-field roles in the two 32-byte RTBuddy segment
-   descriptors from static call sites before assigning physical, device, or
-   virtual-address semantics.
+2. Validate the resolved RTBuddy segment-field order against an additional
+   iOS 26 kernel before treating it as a family-wide layout.
 3. Validate each remaining iOS 26 AGX patchfinder result against the target
    kernel and GFX firmware without running a GPU command queue.
 4. Keep all live probes count-bounded, read-only, and followed by restoration

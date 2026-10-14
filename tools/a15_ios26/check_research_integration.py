@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 import plistlib
 import re
@@ -39,6 +40,7 @@ def main() -> int:
             )
 
     environment = (ROOT / "Application/Dopamine/Jailbreak/DOEnvironmentManager.m").read_text()
+    project = (ROOT / "Application/Dopamine.xcodeproj/project.pbxproj").read_text()
     settings = (ROOT / "Application/Dopamine/UI/Settings/DOSettingsController.m").read_text()
     titan = (ROOT / "Application/Dopamine/Exploits/Titan/exploit/titan.m").read_text()
     kernel_patchfinder = (
@@ -48,6 +50,9 @@ def main() -> int:
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/gfx_patchfinder.c"
     ).read_text()
     titan_analyzer = (ROOT / "tools/a15_ios26/analyze_titan.py").read_text()
+    live_layout = json.loads(
+        (ROOT / "tools/a15_ios26/live-layout-iphone14_2-23A355.json").read_text()
+    )
     report = (ROOT / "docs/A15_IOS_26_0_1_RESEARCH.md").read_text()
 
     for marker in (
@@ -63,6 +68,16 @@ def main() -> int:
         re.DOTALL,
     )
     require(unsupported_guard.search(environment) is not None, "missing unsupported guard")
+    titan_deployment_targets = re.findall(
+        r'INFOPLIST_FILE = "\$\(SRCROOT\)/Dopamine/Exploits/Titan/Info\.plist";'
+        r".{0,500}?IPHONEOS_DEPLOYMENT_TARGET = ([0-9.]+);",
+        project,
+        re.DOTALL,
+    )
+    require(
+        titan_deployment_targets == ["16.1", "16.1"],
+        "Titan framework deployment targets do not match its supported range",
+    )
     require("Research_Stage_OSDictionary" in settings, "missing OSDictionary status")
     require("Research_Stage_IORVBAR" in settings, "missing in-app research status")
     require(
@@ -72,6 +87,18 @@ def main() -> int:
     for marker in ("0xfffffff007aaaf58", "dictionary=+0x20", "16-byte"):
         require(marker in report, f"report is missing OSDictionary evidence: {marker}")
     require("fAddress=+0x28" in report, "report is missing the validated map offset")
+    segment_ranges = live_layout["io_registry"]["segment_properties"]["segment_ranges"]
+    require(
+        segment_ranges.get("field_roles")
+        == {
+            "field_00": "physical",
+            "field_08": "virtual",
+            "field_10": "remap",
+            "field_18_low32": "length",
+            "field_18_high32": "flags",
+        },
+        "live-layout manifest is missing resolved RTBuddy segment semantics",
+    )
     require(
         "offline or VM scan cannot recover `gfx_data_pa` or `gfx_ttbr_pa`" in report,
         "report does not distinguish static RTKit markers from live state",
