@@ -42,6 +42,7 @@ def main() -> int:
     environment = (ROOT / "Application/Dopamine/Jailbreak/DOEnvironmentManager.m").read_text()
     project = (ROOT / "Application/Dopamine.xcodeproj/project.pbxproj").read_text()
     settings = (ROOT / "Application/Dopamine/UI/Settings/DOSettingsController.m").read_text()
+    main_view = (ROOT / "Application/Dopamine/UI/DOMainViewController.m").read_text()
     titan = (ROOT / "Application/Dopamine/Exploits/Titan/exploit/titan.m").read_text()
     kernel_patchfinder = (
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/kernel_patchfinder.c"
@@ -81,6 +82,36 @@ def main() -> int:
     )
     require("Research_Stage_OSDictionary" in settings, "missing OSDictionary status")
     require("Research_Stage_IORVBAR" in settings, "missing in-app research status")
+    require("Research_Button_Run" in main_view, "missing research diagnostic button")
+    diagnostic_start = main_view.find("- (void)startResearchDiagnostics")
+    diagnostic_end = main_view.find("- (void)viewWillAppear", diagnostic_start)
+    require(
+        diagnostic_start >= 0 and diagnostic_end > diagnostic_start,
+        "missing bounded research diagnostic implementation",
+    )
+    diagnostic_body = main_view[diagnostic_start:diagnostic_end]
+    for forbidden in (
+        "DOJailbreaker",
+        "startJailbreak",
+        "titan_run",
+        "titan_setup_command_buffers",
+        "gfx_write",
+        "kwrite",
+        "physwritebuf(",
+        "gPrimitives.physwritebuf",
+    ):
+        require(
+            forbidden not in diagnostic_body,
+            f"research diagnostic unexpectedly references {forbidden}",
+        )
+    for marker in (
+        'record(@"titan.command_buffers", @"BLOCKED"',
+        'record(@"titan.physical_write", @"NOT_REACHED"',
+        'record(@"sptm_txm.runtime_response", @"NOT_REACHED"',
+        'Documents/a15-ios26-diagnostic.json',
+        '@"asserts_live_sptm_txm_response": @NO',
+    ):
+        require(marker in diagnostic_body, f"research diagnostic is missing safety marker: {marker}")
     require(
         "MAPPING_VALIDATED_TITAN_EXECUTION_BLOCKED" in report,
         "report does not record the current diagnostic blocker",
@@ -107,7 +138,12 @@ def main() -> int:
 
     for localization in ("en", "fr"):
         strings = (ROOT / f"Application/Dopamine/{localization}.lproj/Localizable.strings").read_text()
-        for key in ("Research_Target_Header", "Research_Stage_OSDictionary", "Research_Stage_IORVBAR"):
+        for key in (
+            "Research_Target_Header",
+            "Research_Stage_OSDictionary",
+            "Research_Stage_IORVBAR",
+            "Research_Button_Run",
+        ):
             require(strings.count(f'"{key}" =') == 1, f"{localization} localization is missing {key}")
 
     titan_run = titan.find("int titan_run")

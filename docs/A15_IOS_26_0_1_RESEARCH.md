@@ -264,6 +264,11 @@ GPU memory behavior, MMIO access, or a physical-write primitive.
   there is no unanchored hard-coded field offset.
 - Titan refuses iOS 26 command-buffer setup and direct IORVBAR/MMIO mapping
   while the later Titan execution chain remains unvalidated.
+- The unsupported target now exposes a separate `Run Diagnostics` action. It
+  records target identity, SPTM presence, packaged Titan metadata, and explicit
+  blocked/not-reached checkpoints to the UI, USB system log, and
+  `Documents/a15-ios26-diagnostic.json`. It never instantiates `DOJailbreaker`
+  or calls Titan, GFX, kernel-write, MMIO, or physical-write code.
 
 These items are research scaffolding. They have not established an end-to-end
 physical-write primitive and must not be interpreted as exploit support.

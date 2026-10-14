@@ -124,11 +124,14 @@
     //Jailbreak Button
     BOOL isJailbroken = [[DOEnvironmentManager sharedManager] isJailbroken] || [[DOEnvironmentManager sharedManager] isJailbrokenWithOtherJailbreak];
     BOOL isSupported = [[DOEnvironmentManager sharedManager] isSupported];
+    BOOL isResearchTarget = [[DOEnvironmentManager sharedManager] isA15IOS2601ResearchTarget];
 
     NSString *jailbreakButtonTitle = [self jailbreakButtonTitle];
         
     UIImage *jailbreakButtonImage;
-    if (isSupported)
+    if (isResearchTarget)
+        jailbreakButtonImage = [UIImage systemImageNamed:@"waveform.path.ecg" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]];
+    else if (isSupported)
         jailbreakButtonImage = [UIImage systemImageNamed:@"lock.open" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]];
     else
         jailbreakButtonImage = [UIImage systemImageNamed:@"lock.slash" withConfiguration:[DOGlobalAppearance smallIconImageConfiguration]];
@@ -143,10 +146,15 @@
             self.updateButton.alpha = 0;
         } completion:nil];
         
-        [self startJailbreak];
+        if ([[DOEnvironmentManager sharedManager] isA15IOS2601ResearchTarget]) {
+            [self startResearchDiagnostics];
+        }
+        else {
+            [self startJailbreak];
+        }
         
     }]];
-    self.jailbreakBtn.enabled = !isJailbroken && isSupported;
+    self.jailbreakBtn.enabled = !isJailbroken && (isSupported || isResearchTarget);
 
     [self.view addSubview:self.jailbreakBtn];
 
@@ -177,10 +185,13 @@
 {
     BOOL isJailbroken = [[DOEnvironmentManager sharedManager] isJailbroken];
     BOOL isSupported = [[DOEnvironmentManager sharedManager] isSupported];
+    BOOL isResearchTarget = [[DOEnvironmentManager sharedManager] isA15IOS2601ResearchTarget];
     BOOL removeJailbreakEnabled = [[DOPreferenceManager sharedManager] boolPreferenceValueForKey:@"removeJailbreakEnabled" fallback:NO];
 
     NSString *jailbreakButtonTitle = DOLocalizedString(@"Button_Jailbreak_Title");
-    if (!isSupported)
+    if (isResearchTarget)
+        jailbreakButtonTitle = DOLocalizedString(@"Research_Button_Run");
+    else if (!isSupported)
         jailbreakButtonTitle = DOLocalizedString(@"Unsupported");
     else if (isJailbroken)
         jailbreakButtonTitle = DOLocalizedString(@"Status_Title_Jailbroken");
@@ -188,6 +199,80 @@
         jailbreakButtonTitle = DOLocalizedString(@"Button_Remove_Jailbreak");
     
     return jailbreakButtonTitle;
+}
+
+- (void)emitResearchDiagnosticEvent:(NSString *)event
+{
+    NSString *line = [NSString stringWithFormat:@"[A15DIAG] %@", event];
+    [[DOUIManager sharedInstance] sendLog:line debug:NO];
+    NSLog(@"%@", line);
+}
+
+- (void)startResearchDiagnostics
+{
+    DOEnvironmentManager *environment = [DOEnvironmentManager sharedManager];
+    if (![environment isA15IOS2601ResearchTarget]) {
+        [self emitResearchDiagnosticEvent:@"checkpoint=target.identity status=REJECTED"];
+        return;
+    }
+
+    [[DOUIManager sharedInstance] startLogCapture];
+    self.jailbreakBtn.enabled = NO;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSMutableArray<NSDictionary *> *events = [NSMutableArray new];
+        void (^record)(NSString *, NSString *, NSString *) = ^(NSString *checkpoint, NSString *status, NSString *evidence) {
+            NSDictionary *event = @{
+                @"checkpoint": checkpoint,
+                @"status": status,
+                @"evidence": evidence,
+            };
+            [events addObject:event];
+            [self emitResearchDiagnosticEvent:[NSString stringWithFormat:@"checkpoint=%@ status=%@ evidence=%@", checkpoint, status, evidence]];
+        };
+
+        record(@"target.identity", @"OBSERVED", @"iPhone14,2/A15/iOS-26.0.1/23A355");
+        record(@"environment.sptm", @"OBSERVED", [environment isSPTM] ? @"present" : @"not-detected");
+
+        NSString *titanPath = [[NSBundle mainBundle].privateFrameworksPath stringByAppendingPathComponent:@"Titan.framework"];
+        NSDictionary *titanInfo = [NSDictionary dictionaryWithContentsOfFile:[titanPath stringByAppendingPathComponent:@"Info.plist"]];
+        NSDictionary *defaultFlavor = titanInfo[@"DPExploitFlavors"][@"default"];
+        NSArray *ranges = defaultFlavor[@"DPSupportedRanges"] ?: @[];
+        BOOL titanMetadataPresent = titanInfo != nil && ranges.count > 0;
+        record(@"titan.framework_metadata", titanMetadataPresent ? @"OBSERVED" : @"INCOMPLETE",
+               titanMetadataPresent ? [ranges description] : @"missing");
+
+        record(@"kernel.runtime_read_write", @"MISSING", @"no-target-compatible-primitive");
+        record(@"titan.command_buffers", @"BLOCKED", @"diagnostic-mode");
+        record(@"titan.physical_write", @"NOT_REACHED", @"physwritebuf-not-published");
+        record(@"sptm_txm.runtime_response", @"NOT_REACHED", @"no-protected-component-request-issued");
+
+        NSDictionary *report = @{
+            @"schema": @"dopamine.a15-ios26.device-diagnostic.v1",
+            @"diagnostic_only": @YES,
+            @"asserts_live_sptm_txm_response": @NO,
+            @"target": @{
+                @"device": @"iPhone14,2",
+                @"soc": @"A15",
+                @"ios": @"26.0.1",
+                @"build": @"23A355",
+            },
+            @"txm_static_base": @"0xfffffff017004000",
+            @"events": events,
+        };
+
+        NSError *jsonError = nil;
+        NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:&jsonError];
+        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic.json"];
+        BOOL wroteReport = json != nil && [json writeToFile:outputPath options:NSDataWritingAtomic error:&jsonError];
+        [self emitResearchDiagnosticEvent:wroteReport
+            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic.json"
+            : [NSString stringWithFormat:@"checkpoint=report.write status=FAIL error=%@", jsonError.localizedDescription ?: @"unknown"]];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[DOUIManager sharedInstance] completeJailbreak];
+        });
+    });
 }
 
 - (void)viewWillAppear:(BOOL)animated
