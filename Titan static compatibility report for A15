@@ -1,0 +1,77 @@
+Titan static compatibility report
+
+This report reproduces Titan's exact masked instruction searches without
+executing Titan or modifying the firmware images.
+
+## Summary
+
+- Kernel IOGPU/AGX patchfinders: **FAIL**
+- GFX patchfinders (at least one firmware slice): **FAIL**
+- Live GFX state and physical-write primitive: **NOT TESTED**
+
+First kernel failure: `AGXCommandQueue::processKernelCommand`
+
+## Kernel patchfinders
+
+Filesets: `com.apple.iokit.IOGPUFamily`, `com.apple.AGXG14P`, `com.apple.kernel`.
+
+| Finder | Status | First hit | Derived value(s) |
+|---|---:|---:|---|
+| `IOGPUDeviceUserClient::s_delete_command_queue` | **PASS** | `0xfffffff009f1a8a8` | IOGPUDeviceUserClient.IOGPUDevice=0x120 |
+| `IOGPUMemoryMap::freeGPUVirtualAddress` | **PASS** | `0xfffffff009f51e70` | store=0xfffffff009f51e78, IOGPUMemoryMap.GPUVirtualAddress=0x28 |
+| `AGXCommandQueue::processKernelCommand` | **FAIL** | `-` | closest=0xfffffff0087db7c0, 4/5 words |
+| `AGXCommandQueue fence sequence` | **FAIL** | `-` | closest=0xfffffff008859cf4, 4/6 words |
+| `IOGPUDevice::create_shmem` | **PASS** | `0xfffffff009f386a0` | namespace_load=0xfffffff009f386fc, IOGPUDevice.IOGPUNamespace=0x78 |
+| `IOGPUWeakNamespace::alloc_handles` | **PASS** | `0xfffffff009f173d0` | IOGPUWeakNamespace.handles=0x10 |
+| `IOGPUKernelMappedMemory::getKernelData` | **PASS** | `0xfffffff009f24950` | offset_source=0xfffffff009f2495c, IOGPUDeviceShmem.map=0x30 |
+| `IOMemoryMap::wireRange` | **PASS** | `0xfffffff008133030` | IOMemoryMap.fAddress=0x260 |
+| `AGXDeviceUserClient vtable reference` | **PASS** | `0xfffffff0088139c0` | adrp_add=0xfffffff0088139b0, IOGPUDeviceUserClient_vtable=0xfffffff007b17a00 |
+
+### iOS 26 AGX candidate
+
+Status: **CANDIDATE**. Evidence only: Titan currently models IOGPU.IOGPUMemoryMap as one direct offset, while this build appears to use a nested access.
+
+IOGPU.fence_value=0x60c8, intermediate_load=0xfffffff008859d1c, intermediate_offset=0x50, nested_slot_offset=0x152a0, buffer_marker=0xfffffff008859d60, IOGPU.buffer_offset=0x498
+
+## GFX slice `a000`
+
+Overall static result: **FAIL**
+
+| Finder | Status | First hit | Derived value(s) |
+|---|---:|---:|---|
+| `arm_hibernate` | **FAIL** | `-` | closest=0xffffff8000001010, 2/5 words |
+| `TPIDRRO_EL0 gadget` | **PASS** | `0xffffff8000001ca8` | - |
+| `STR X1, [X0, X2]; RET gadget` | **PASS** | `0xffffff8000000898` | - |
+| `ROP invocation gadget` | **PASS** | `0xffffff8000001e88` | - |
+| `TLB flush gadget` | **PASS** | `0xffffff8000000858` | - |
+| `cache flush gadget` | **PASS** | `0xffffff800000084c` | - |
+| `spin gadget` | **PASS** | `0xffffff800000008c` | - |
+| `power thread reference` | **PASS** | `0xffffff8000040274` | pointer=0xffffff8000129e68, file_value=0x0 |
+| `arm_arch_resume` | **PASS** | `0xffffff80000013f0` | literal_load=0xffffff80000014e0, pointer=0xffffff80000015e0, file_value=0xc8883005 |
+
+Symbol-backed iOS 26 candidates (offline evidence only): `__arm_arch_hibernate_uat`=0xffffff800000125c, `__hb_context`=0xffffff8000078390, `__fp_context`=0xffffff8000078500, `_arm_hb_context`=0xffffff80000784f8, `_arm_fp_context`=0xffffff8000078708
+
+## GFX slice `b000`
+
+Overall static result: **FAIL**
+
+| Finder | Status | First hit | Derived value(s) |
+|---|---:|---:|---|
+| `arm_hibernate` | **FAIL** | `-` | closest=0xffffff8000001010, 2/5 words |
+| `TPIDRRO_EL0 gadget` | **PASS** | `0xffffff8000001ca8` | - |
+| `STR X1, [X0, X2]; RET gadget` | **PASS** | `0xffffff8000000898` | - |
+| `ROP invocation gadget` | **PASS** | `0xffffff8000001e88` | - |
+| `TLB flush gadget` | **PASS** | `0xffffff8000000858` | - |
+| `cache flush gadget` | **PASS** | `0xffffff800000084c` | - |
+| `spin gadget` | **PASS** | `0xffffff800000008c` | - |
+| `power thread reference` | **PASS** | `0xffffff8000047e10` | pointer=0xffffff8000131e68, file_value=0x0 |
+| `arm_arch_resume` | **PASS** | `0xffffff80000013f0` | literal_load=0xffffff80000014e0, pointer=0xffffff80000015e0, file_value=0xc8883005 |
+
+Symbol-backed iOS 26 candidates (offline evidence only): `__arm_arch_hibernate_uat`=0xffffff800000125c, `__hb_context`=0xffffff8000080390, `__fp_context`=0xffffff8000080500, `_arm_hb_context`=0xffffff80000804f8, `_arm_fp_context`=0xffffff8000080708
+
+## Interpretation
+
+A PASS only means the static instruction relationships used by Titan still
+resolve. `target_job`, live RTKit addresses, command-buffer setup, the GFX ROP
+trigger, and unrestricted physical writes require a separate device probe.
+No support range should be widened from this report alone.
