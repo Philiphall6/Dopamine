@@ -77,6 +77,10 @@ GPU memory behavior, MMIO access, or a physical-write primitive.
 - Existing static analyzers resolve the inspected SPTM/TXM anchor
   relationships and selected Titan kernel/GFX patchfinder relationships for
   the sample firmware.
+- Each packaged GFX firmware slice contains one `0x7777777777777700` RTKit
+  marker occurrence in `__TEXT` at `0xffffff8000000990`. The surrounding bytes
+  belong to the executable image, not the live reset-vector structure, so an
+  offline or VM scan cannot recover `gfx_data_pa` or `gfx_ttbr_pa` from it.
 - The observations used for this work were bounded and read-only. No kernel
   write, GPU command queue, direct physical write, or MMIO access was used.
 

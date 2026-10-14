@@ -47,6 +47,7 @@ def main() -> int:
     gfx_patchfinder = (
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/gfx_patchfinder.c"
     ).read_text()
+    titan_analyzer = (ROOT / "tools/a15_ios26/analyze_titan.py").read_text()
     report = (ROOT / "docs/A15_IOS_26_0_1_RESEARCH.md").read_text()
 
     for marker in (
@@ -71,6 +72,10 @@ def main() -> int:
     for marker in ("0xfffffff007aaaf58", "dictionary=+0x20", "16-byte"):
         require(marker in report, f"report is missing OSDictionary evidence: {marker}")
     require("fAddress=+0x28" in report, "report is missing the validated map offset")
+    require(
+        "offline or VM scan cannot recover `gfx_data_pa` or `gfx_ttbr_pa`" in report,
+        "report does not distinguish static RTKit markers from live state",
+    )
 
     for localization in ("en", "fr"):
         strings = (ROOT / f"Application/Dopamine/{localization}.lproj/Localizable.strings").read_text()
@@ -102,6 +107,12 @@ def main() -> int:
     require(
         "gfx_patchfind_unique(ios26_insns, ios26_masks, 11)" in gfx_patchfinder,
         "iOS 26 GFX hibernation ABI anchor is not unique or complete",
+    )
+    require(
+        "analyze_static_rtkit_marker" in titan_analyzer
+        and "EXECUTABLE_IMAGE_OCCURRENCES_ONLY" in titan_analyzer
+        and '"runtime_values_available": False' in titan_analyzer,
+        "offline analyzer no longer scopes static RTKit markers away from live state",
     )
 
     print(

@@ -24,6 +24,7 @@ lief.logging.disable()
 MACHO64_MAGIC = 0xFEEDFACF
 LC_SEGMENT_64 = 0x19
 UINT64_MASK = (1 << 64) - 1
+RTKIT_MARKER = struct.pack("<Q", 0x7777777777777700)
 
 LIVE_EXPECTED_OFFSETS = {
     "AGXFirmwareKextG14RTBuddy.firmware_asc": 0x160,
@@ -887,6 +888,38 @@ def analyze_ios26_gfx_candidate(image: MappedImage) -> dict:
     }
 
 
+def analyze_static_rtkit_marker(image: MappedImage) -> dict:
+    hits = []
+    for segment in image.segments:
+        cursor = 0
+        while True:
+            offset = segment.content.find(RTKIT_MARKER, cursor)
+            if offset < 0:
+                break
+            hits.append(
+                {
+                    "segment": segment.name,
+                    "address": segment.vmaddr + offset,
+                }
+            )
+            cursor = offset + 1
+
+    executable_only = bool(hits) and all(hit["segment"] == "__TEXT" for hit in hits)
+    return {
+        "status": (
+            "EXECUTABLE_IMAGE_OCCURRENCES_ONLY"
+            if executable_only
+            else "NO_STATIC_MARKER" if not hits else "REVIEW_REQUIRED"
+        ),
+        "hits": hits,
+        "runtime_values_available": False,
+        "note": (
+            "Static occurrences are inside the packaged executable image. They are "
+            "not the live reset-vector structure that Titan reads after GPU reset."
+        ),
+    }
+
+
 def analyze_gfx(path: pathlib.Path) -> dict:
     slices = []
     for image in parse_gfx_images(path):
@@ -932,6 +965,7 @@ def analyze_gfx(path: pathlib.Path) -> dict:
                 "first_failure": first_failure,
                 "checks": checks,
                 "ios26_hibernate_candidate": ios26_candidate,
+                "rtkit_marker_scope": analyze_static_rtkit_marker(image),
                 "ios26_symbol_candidates": {
                     name: image.symbols[name]
                     for name in (
@@ -1207,6 +1241,21 @@ def render_markdown(report: dict) -> str:
                     "Symbol-backed iOS 26 candidates (offline evidence only): " + symbols,
                 ]
             )
+        marker = item["rtkit_marker_scope"]
+        locations = ", ".join(
+            f"`{hit['segment']}` at {hex_value(hit['address'])}"
+            for hit in marker["hits"]
+        ) or "none"
+        lines.extend(
+            [
+                "",
+                "### RTKit marker scope",
+                "",
+                f"Status: **{marker['status']}**. {marker['note']}",
+                f"Static locations: {locations}.",
+                "Runtime `gfx_data_pa` and `gfx_ttbr_pa`: **NOT AVAILABLE OFFLINE**.",
+            ]
+        )
     if live_layout:
         lines.extend(
             [
