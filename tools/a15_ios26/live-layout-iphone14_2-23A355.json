@@ -1,0 +1,130 @@
+{
+  "schema": 1,
+  "device": "iPhone14,2",
+  "soc": "A15",
+  "ios": "26.0.1",
+  "build": "23A355",
+  "darwin": "25.0.0",
+  "mode": "read-only",
+  "rtbuddy_vtable_unslid": "0xfffffff007b14160",
+  "offsets": {
+    "AGXFirmwareKextG14RTBuddy.firmware_asc": "0x160",
+    "AGXFirmwareKextG14RTBuddy.accelerator": "0x168",
+    "AGXArmFirmwareASC.accelerator_primary": "0x118",
+    "AGXArmFirmwareASC.accelerator_secondary": "0x120",
+    "AGXArmFirmwareASC.allocation": "0x128",
+    "AGXArmFirmwareASC.secure_memory_map": "0x130",
+    "AGXArmFirmwareASC.event_machine": "0x148"
+  },
+  "iorvbar": {
+    "physical": "0x206050000",
+    "length": "0x8",
+    "mapping_status": "VALIDATED",
+    "papt_contains_physical": false,
+    "asc_map_field_offset": "0x180",
+    "asc_map_field_value": "0x0",
+    "asc_value_field_offset": "0x188",
+    "asc_value_field_value": "0x2100402a8",
+    "kernel_virtual_address": "0xffffffec9be40000",
+    "reason": "The IODeviceMemory descriptor, physical range, existing IOMemoryMap class, descriptor linkage, zero offset, eight-byte length, and kernel virtual address are proven. The MMIO address was not dereferenced."
+  },
+  "io_registry": {
+    "service_name": "gfx-asc",
+    "service_class": "AppleARMIODevice",
+    "service_vtable_unslid": "0xfffffff007b55c68",
+    "service_object_size": "0x108",
+    "provider_class": "AppleT811xIO",
+    "provider_object_size": "0x120",
+    "property_table_class": "OSDictionary",
+    "property_table_vtable_unslid": "0xfffffff007aaaf58",
+    "property_table_object_size": "0x28",
+    "dictionary_layout": {
+      "options": "0x10",
+      "count": "0x14",
+      "capacity": "0x18",
+      "capacity_increment": "0x1c",
+      "entries": "0x20",
+      "entry_size": "0x10",
+      "key": "0x0",
+      "value": "0x8"
+    },
+    "metadata_probe_status": "VALIDATED",
+    "property_count": 20,
+    "io_device_memory_status": "FOUND",
+    "io_device_memory_key_index": 17,
+    "io_device_memory_value_class": "OSArray",
+    "io_device_memory_value_vtable_unslid": "0xfffffff007aaa8a0",
+    "io_device_memory_count": 2,
+    "memory_descriptor_class": "IOGeneralMemoryDescriptor",
+    "memory_descriptor_vtable_unslid": "0xfffffff007ab5348",
+    "memory_descriptors": [
+      {
+        "index": 0,
+        "physical": "0x206400000",
+        "length": "0x6c000",
+        "ranges_count": 1,
+        "mappings_status": "PRESENT_NOT_ENUMERATED"
+      },
+      {
+        "index": 1,
+        "physical": "0x206050000",
+        "length": "0x8",
+        "ranges_count": 1,
+        "mappings_status": "VALIDATED_EXISTING_KERNEL_MAPPING",
+        "role": "GFX_IORVBAR"
+      }
+    ],
+    "mapping_collection": {
+      "descriptor_index": 1,
+      "set_class": "OSSet",
+      "set_members_offset": "0x18",
+      "array_class": "OSArray",
+      "array_count": 1,
+      "array_capacity": 2,
+      "element_status": "IOMEMORYMAP_VTABLE_VALIDATED",
+      "element_vtable_unslid": "0xfffffff007ab4820",
+      "element_object_size": "0x58",
+      "field_offsets": {
+        "fOptions": "0xc",
+        "fMemory": "0x10",
+        "fSuperMap": "0x18",
+        "fOffset": "0x20",
+        "fAddress": "0x28",
+        "fLength": "0x30",
+        "fAddressTask": "0x38",
+        "fAddressMap": "0x40"
+      },
+      "live_sample": {
+        "object": "0xffffffe0cd7af3f8",
+        "fOptions": "0x1",
+        "fMemory": "0xffffffdfe799d350",
+        "fSuperMap": "0x0",
+        "fOffset": "0x0",
+        "fAddress": "0xffffffec9be40000",
+        "fLength": "0x8",
+        "fAddressTask": "0xffffffe0cd925e08",
+        "fAddressMap": "0xffffffdc002053f0"
+      },
+      "address_status": "VALIDATED_EXISTING_KERNEL_MAPPING",
+      "probe_version_required_for_next_stage": 9
+    },
+    "mapping_probe_guardrail": "The initial two-descriptor vtable traversal terminated Filza. A replacement single-descriptor staged traversal, with static OSSet validation and count-first OSArray reads, succeeded. The resulting MMIO mapping address must not be dereferenced by the diagnostic probe."
+  },
+  "static_layout": {
+    "agx_arm_firmware_asc_constructor": "0xfffffff00884b540",
+    "object_size": "0x1be0",
+    "embedded_subobject_start": "0x110",
+    "embedded_subobject_next": "0x190",
+    "embedded_subobject_vtable_table": "0xfffffff007b21fc8",
+    "embedded_subobject_vtable_pointer": "0xfffffff007b21fd8",
+    "live_tail_scalars": {
+      "field_160": "0x340",
+      "field_168": "0x2220000000100",
+      "field_170": "0xa8",
+      "field_180": "0x0",
+      "field_188": "0x22212f009"
+    },
+    "field_178_target_qword_00": "0x0",
+    "conclusion": "ASC +0x180 and +0x188 are payload fields inside the embedded +0x110 subobject, not an AppleASCWrapV4 map/address pair."
+  }
+}

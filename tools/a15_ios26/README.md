@@ -1,0 +1,82 @@
+# A15 iOS 26 SPTM/TXM analysis
+
+`analyze_sptm_txm.py` checks the static assumptions made by
+`BaseBin/XPF/src/sptm_txm.c` against extracted firmware images. It is intended
+to distinguish a patchfinder compatibility problem from a missing SPTM bypass.
+
+The tool is diagnostic-only. It does not patch a firmware image, change
+Dopamine's supported-device metadata, or execute an exploit.
+
+`analyze_titan.py` separately reproduces the masked instruction searches in
+Titan's kernel and GFX patchfinders. It understands the `rkosftab` container
+used by extracted GFX firmware and checks every embedded firmware slice.
+
+`analyze_vtable_fields.py` decodes authenticated chained vtable entries in an
+offline kernelcache and reports accesses to selected object-field offsets.
+`disassemble_fileset.py` resolves unslid virtual addresses across every fileset
+and prints bounded ARM64 disassembly for manual validation of method boundaries.
+
+## Dependencies
+
+```sh
+python -m pip install lief capstone
+```
+
+## Usage
+
+```sh
+python tools/a15_ios26/analyze_sptm_txm.py \
+  --kernel kernelcache.bin \
+  --sptm sptm.bin \
+  --txm txm.bin \
+  --output sptm-txm-static-report.md \
+  --json-output sptm-txm-static-report.json
+
+python tools/a15_ios26/analyze_titan.py \
+  --kernel kernelcache.bin \
+  --gfx gfx.bin \
+  --live-layout tools/a15_ios26/live-layout-iphone14_2-23A355.json \
+  --output titan-static-report.md \
+  --json-output titan-static-report.json
+```
+
+The kernel image may be an Apple fileset kernelcache. The analyzer selects the
+`com.apple.kernel` fileset automatically.
+
+## Confirmed sample
+
+The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
+23A355. On that sample, the existing XPF relationships resolve the following:
+
+- TXM device-tree trust-cache lookup and trust-cache root
+- TXM developer-mode storage
+- SPTM compressed PAPT range count and table
+- kernel-side SPTM argument pointer and page-table refcount helper
+- `vm_first_phys`, `vm_last_phys`, frame table, and frame-type parameters
+- `libsptm_init` and its PAPT range globals
+
+These results show patchfinder compatibility for the inspected paths. They do
+not provide the unrestricted physical-write primitive required by Dopamine's
+SPTM bypass contract, and therefore do not make A15/iOS 26 jailbreak-compatible
+by themselves. All reported addresses are unslid and specific to the analyzed
+firmware build.
+
+The Titan report has the same limitation. A static PASS does not validate the
+live RTKit state, command-buffer setup, GFX ROP trigger, or physical-write
+primitive. Those stages require a deliberately bounded on-device probe.
+
+The optional live-layout manifest records read-only object-layout evidence.
+When a staged probe proves object linkage, it may also record per-boot live
+addresses; those values are evidence for that capture and are never reusable
+offsets. Even with a `VALIDATED` IORVBAR mapping, the analyzer keeps Titan
+execution blocked until the later AGX and physical-write stages are validated.
+
+## Diagnostic integration policy
+
+The app-side research status and its support guard are documented in
+`docs/A15_IOS_26_0_1_RESEARCH.md`. Check that A15/iOS 26.0.1 remains excluded
+from Titan support metadata and blocked before GPU command-buffer setup with:
+
+```sh
+python tools/a15_ios26/check_research_integration.py
+```

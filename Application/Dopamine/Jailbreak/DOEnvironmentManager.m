@@ -241,8 +241,30 @@ extern char **environ;
     return false;
 }
 
+- (BOOL)isA15IOS2601ResearchTarget
+{
+    cpu_subtype_t cpuFamily = 0;
+    size_t cpuFamilySize = sizeof(cpuFamily);
+    if (sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0) != 0) {
+        return NO;
+    }
+
+    struct utsname deviceInfo;
+    if (uname(&deviceInfo) != 0) {
+        return NO;
+    }
+
+    return cpuFamily == CPUFAMILY_ARM_BLIZZARD_AVALANCHE &&
+           strcmp(deviceInfo.machine, "iPhone14,2") == 0 &&
+           [[self systemVersion] isEqualToString:@"26.0.1"];
+}
+
 - (NSString *)versionSupportString
 {
+    if ([self isA15IOS2601ResearchTarget]) {
+        return DOLocalizedString(@"Research_Target_Header");
+    }
+
     cpu_subtype_t cpuFamily = 0;
     size_t cpuFamilySize = sizeof(cpuFamily);
     sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);
@@ -777,6 +799,12 @@ extern char **environ;
 
 - (BOOL)isSupported
 {
+    // This exact target is tracked for diagnostics only. Keep it out of the
+    // jailbreak path even if exploit metadata is accidentally broadened.
+    if ([self isA15IOS2601ResearchTarget]) {
+        return NO;
+    }
+
     //cpu_subtype_t cpuFamily = 0;
     //size_t cpuFamilySize = sizeof(cpuFamily);
     //sysctlbyname("hw.cpufamily", &cpuFamily, &cpuFamilySize, NULL, 0);

@@ -37,6 +37,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)isSupported;
 - (BOOL)isArm64e;
 - (BOOL)isSPTM;
+- (BOOL)isA15IOS2601ResearchTarget;
 - (NSString *)versionSupportString;
 - (NSString *)accessibleKernelPath;
 - (NSString *)accessibleSPTMPath;

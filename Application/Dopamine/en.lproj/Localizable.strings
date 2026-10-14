@@ -129,3 +129,13 @@
 "Status_Title_Select_Package_Managers" = "Select Package Manager(s)";
 "Select_Package_Managers_Install_Message" = "If you are unsure which one to select, select Sileo";
 "Continue" = "Continue";
+
+// A15 / iOS 26.0.1 research target
+"Research_Target_Header" = "A15 / iOS 26.0.1 research target (unsupported)";
+"Research_Section_Title" = "A15 / iOS 26.0.1 Research";
+"Research_Section_Footer" = "Diagnostic target only. Dopamine does not support jailbreaking this target. Observations are bounded and read-only; no kernel write, GPU command queue, or MMIO access is enabled.";
+"Research_Stage_Target" = "1. Target identification: proven";
+"Research_Stage_Static" = "2. Static SPTM/TXM chain: partial";
+"Research_Stage_OSDictionary" = "3. OSDictionary layout: proven";
+"Research_Stage_IORegistry" = "4. IODeviceMemory chain: proven";
+"Research_Stage_IORVBAR" = "5. Existing IORVBAR mapping: validated; Titan execution blocked";

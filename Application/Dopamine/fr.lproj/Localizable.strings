@@ -123,3 +123,13 @@
 "Select_Package_Managers_Install_Message" = "Selectionnez les gestionnaires de paquets à installer, si vous n'êtes pas sûr de votre choix, sélectionnez Sileo";
 "Continue" = "Continuer";
 
+// Cible de recherche A15 / iOS 26.0.1
+"Research_Target_Header" = "Cible de recherche A15 / iOS 26.0.1 (non prise en charge)";
+"Research_Section_Title" = "Recherche A15 / iOS 26.0.1";
+"Research_Section_Footer" = "Cible de diagnostic uniquement. Dopamine ne prend pas en charge le jailbreak de cette cible. Les observations sont bornées et en lecture seule ; aucune écriture noyau, file de commandes GPU ou accès MMIO n'est activé.";
+"Research_Stage_Target" = "1. Identification de la cible : prouvée";
+"Research_Stage_Static" = "2. Chaîne statique SPTM/TXM : partielle";
+"Research_Stage_OSDictionary" = "3. Structure OSDictionary : prouvée";
+"Research_Stage_IORegistry" = "4. Chaîne IODeviceMemory : prouvée";
+"Research_Stage_IORVBAR" = "5. Mapping IORVBAR existant : validé ; exécution Titan bloquée";
+

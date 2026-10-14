@@ -174,6 +174,26 @@
         [headerSpecifier setProperty:@"DOHeaderCell" forKey:@"headerCellClass"];
         [headerSpecifier setProperty:[NSString stringWithFormat:@"Settings"] forKey:@"title"];
         [specifiers addObject:headerSpecifier];
+
+        if ([envManager isA15IOS2601ResearchTarget]) {
+            PSSpecifier *researchGroupSpecifier = [PSSpecifier emptyGroupSpecifier];
+            researchGroupSpecifier.name = DOLocalizedString(@"Research_Section_Title");
+            [researchGroupSpecifier setProperty:DOLocalizedString(@"Research_Section_Footer") forKey:@"footerText"];
+            [specifiers addObject:researchGroupSpecifier];
+
+            NSArray<NSString *> *researchStages = @[
+                @"Research_Stage_Target",
+                @"Research_Stage_Static",
+                @"Research_Stage_OSDictionary",
+                @"Research_Stage_IORegistry",
+                @"Research_Stage_IORVBAR",
+            ];
+            for (NSString *stage in researchStages) {
+                PSSpecifier *stageSpecifier = [PSSpecifier preferenceSpecifierNamed:DOLocalizedString(stage) target:nil set:nil get:nil detail:nil cell:PSStaticTextCell edit:nil];
+                [stageSpecifier setProperty:@NO forKey:@"enabled"];
+                [specifiers addObject:stageSpecifier];
+            }
+        }
         
         if (envManager.isSupported) {
             if (!envManager.isJailbroken) {
