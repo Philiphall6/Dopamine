@@ -44,6 +44,9 @@ def main() -> int:
     kernel_patchfinder = (
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/kernel_patchfinder.c"
     ).read_text()
+    gfx_patchfinder = (
+        ROOT / "Application/Dopamine/Exploits/Titan/exploit/gfx_patchfinder.c"
+    ).read_text()
     report = (ROOT / "docs/A15_IOS_26_0_1_RESEARCH.md").read_text()
 
     for marker in (
@@ -89,6 +92,10 @@ def main() -> int:
     require(
         "AGX fence layout disagrees with processKernelCommand" in kernel_patchfinder,
         "iOS 26 AGX cross-method layout validation is missing",
+    )
+    require(
+        "gfx_patchfind_unique(ios26_insns, ios26_masks, 11)" in gfx_patchfinder,
+        "iOS 26 GFX hibernation ABI anchor is not unique or complete",
     )
 
     print(

@@ -701,8 +701,32 @@ GFX_PATTERNS = {
     ),
     "hibernate_ios26": Pattern(
         "iOS 26 arm_arch_hibernate_uat",
-        (0xA9BF7BFD, 0xF81F8FFC, 0xD53800BC, 0xD3401F9C),
-        (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF),
+        (
+            0xA9BF7BFD,
+            0xF81F8FFC,
+            0xD53800BC,
+            0xD3401F9C,
+            0x9000001D,
+            0x910003BD,
+            0xF83C7BA0,
+            0x9000001D,
+            0x910003BD,
+            0xF83C7BA1,
+            0xF100003F,
+        ),
+        (
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0x9F00001F,
+            0xFFC003FF,
+            0xFFFFFFFF,
+            0x9F00001F,
+            0xFFC003FF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+        ),
     ),
 }
 
@@ -796,6 +820,9 @@ def derive_ios26_hibernation_contexts(image: MappedImage, hit: int) -> dict:
         "arm_fp_context_descriptor": fp_descriptor,
         "hibernation_context": hb_context,
         "fp_context": fp_context,
+        "abi_x0_store": "arm_hb_context",
+        "abi_x1_store": "arm_fp_context",
+        "abi_x1_null_check": True,
         "valid": valid,
     }
 

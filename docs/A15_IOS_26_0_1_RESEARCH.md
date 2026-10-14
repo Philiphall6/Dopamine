@@ -85,6 +85,11 @@ jailbreak path on this exact device and OS combination.
   `AGXG14P` fileset. The in-app fallback now requires that uniqueness and
   cross-validates the independently decoded nested slot (`0x152a0`), map
   (`0x50`), and buffer (`0x498`) offsets before accepting the layout.
+- Both GFX firmware slices contain exactly one strengthened iOS 26 hibernation
+  anchor. Its instructions store `X0` in the per-CPU hibernation-context array,
+  store `X1` in the adjacent FP-context array, and test `X1` before saving FP
+  state; the guarded two-argument call shape now depends on that complete ABI
+  sequence rather than the four-instruction prologue alone.
 - The in-app legacy `IOMemoryMap::wireRange` finder now rejects zero or
   implausibly large field offsets, so the target's false `+0x260` match cannot
   silently enter Titan's offset table.
