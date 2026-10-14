@@ -99,16 +99,27 @@ def main() -> int:
         "kwrite",
         "physwritebuf(",
         "gPrimitives.physwritebuf",
+        "dlopen(",
+        "exploit_init",
+        "IOServiceOpen",
+        "IOConnectCall",
+        "accessibleKernelPath",
     ):
         require(
             forbidden not in diagnostic_body,
             f"research diagnostic unexpectedly references {forbidden}",
         )
     for marker in (
+        '@"schema": @"dopamine.a15-ios26.device-diagnostic.v2"',
+        '@"exploit_matrix": exploitMatrix',
+        'record(@"selector.kernel"',
+        'record(@"selector.pac"',
+        'record(@"selector.ppl"',
+        'record(@"selector.overall"',
         'record(@"titan.command_buffers", @"BLOCKED"',
         'record(@"titan.physical_write", @"NOT_REACHED"',
         'record(@"sptm_txm.runtime_response", @"NOT_REACHED"',
-        'Documents/a15-ios26-diagnostic.json',
+        'Documents/a15-ios26-diagnostic-v2.json',
         '@"asserts_live_sptm_txm_response": @NO',
     ):
         require(marker in diagnostic_body, f"research diagnostic is missing safety marker: {marker}")

@@ -13,8 +13,10 @@
 #import "DOActionMenuButton.h"
 #import "DOUpdateViewController.h"
 #import "DOLogCrashViewController.h"
+#import <os/log.h>
 #import <pthread.h>
 #import <sys/sysctl.h>
+#import <unistd.h>
 #import <libjailbreak/libjailbreak.h>
 
 @interface DOMainViewController ()
@@ -205,7 +207,7 @@
 {
     NSString *line = [NSString stringWithFormat:@"[A15DIAG] %@", event];
     [[DOUIManager sharedInstance] sendLog:line debug:NO];
-    NSLog(@"%@", line);
+    os_log_with_type(OS_LOG_DEFAULT, OS_LOG_TYPE_DEFAULT, "%{public}@", line);
 }
 
 - (void)startResearchDiagnostics
@@ -234,13 +236,137 @@
         record(@"target.identity", @"OBSERVED", @"iPhone14,2/A15/iOS-26.0.1/23A355");
         record(@"environment.sptm", @"OBSERVED", [environment isSPTM] ? @"present" : @"not-detected");
 
-        NSString *titanPath = [[NSBundle mainBundle].privateFrameworksPath stringByAppendingPathComponent:@"Titan.framework"];
-        NSDictionary *titanInfo = [NSDictionary dictionaryWithContentsOfFile:[titanPath stringByAppendingPathComponent:@"Info.plist"]];
-        NSDictionary *defaultFlavor = titanInfo[@"DPExploitFlavors"][@"default"];
-        NSArray *ranges = defaultFlavor[@"DPSupportedRanges"] ?: @[];
-        BOOL titanMetadataPresent = titanInfo != nil && ranges.count > 0;
-        record(@"titan.framework_metadata", titanMetadataPresent ? @"OBSERVED" : @"INCOMPLETE",
-               titanMetadataPresent ? [ranges description] : @"missing");
+        BOOL arm64e = [environment isArm64e];
+        BOOL pacRequired = [environment isPACBypassRequired];
+        BOOL pplRequired = [environment isPPLBypassRequired];
+        record(@"environment.arm64e", arm64e ? @"OBSERVED" : @"UNEXPECTED", arm64e ? @"true" : @"false");
+        record(@"environment.pac_bypass", pacRequired ? @"REQUIRED" : @"NOT_REQUIRED", @"DOEnvironmentManager");
+        record(@"environment.ppl_bypass", pplRequired ? @"REQUIRED" : @"NOT_REQUIRED", @"DOEnvironmentManager");
+        record(@"environment.installation", @"OBSERVED",
+               [NSString stringWithFormat:@"mode=%@ uid=%u", [environment isInstalledThroughTrollStore] ? @"trollstore" : @"sideloaded", getuid()]);
+
+        NSString *bundlePath = [NSBundle mainBundle].bundlePath;
+        NSString *documentsPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents"];
+        NSString *(^artifactLocation)(NSArray<NSString *> *) = ^NSString *(NSArray<NSString *> *names) {
+            for (NSString *name in names) {
+                if ([[NSFileManager defaultManager] fileExistsAtPath:[bundlePath stringByAppendingPathComponent:name]]) {
+                    return [@"bundle/" stringByAppendingString:name];
+                }
+                if ([[NSFileManager defaultManager] fileExistsAtPath:[documentsPath stringByAppendingPathComponent:name]]) {
+                    return [@"Documents/" stringByAppendingString:name];
+                }
+            }
+            return nil;
+        };
+        NSDictionary<NSString *, NSArray<NSString *> *> *artifactNames = @{
+            @"kernel.static_artifact": @[@"kernelcache"],
+            @"sptm.static_artifact": @[@"sptm.img4", @"sptm.im4p"],
+            @"txm.static_artifact": @[@"txm.img4", @"txm.im4p"],
+        };
+        [artifactNames enumerateKeysAndObjectsUsingBlock:^(NSString *checkpoint, NSArray<NSString *> *names, BOOL *stop) {
+            NSString *location = artifactLocation(names);
+            record(checkpoint, location ? @"AVAILABLE" : @"MISSING", location ?: @"not-packaged-or-in-Documents");
+        }];
+
+        NSString *targetVersion = @"26.0.1";
+        NSString *targetBuild = @"23A355";
+        NSArray<NSString *> *targetAliases = @[@"arm64e", @"iPhone14,2", @"A15"];
+        BOOL (^containsTargetAlias)(NSArray *) = ^BOOL(NSArray *values) {
+            for (NSString *value in values ?: @[]) {
+                if ([targetAliases containsObject:value]) return YES;
+            }
+            return NO;
+        };
+        BOOL (^setAffectsTarget)(NSDictionary *) = ^BOOL(NSDictionary *set) {
+            NSArray *devices = set[@"Devices"];
+            return devices == nil || containsTargetAlias(devices);
+        };
+
+        NSString *frameworksPath = [bundlePath stringByAppendingPathComponent:@"Frameworks"];
+        NSArray<NSString *> *frameworkNames = [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:frameworksPath error:nil]
+            sortedArrayUsingSelector:@selector(compare:)];
+        NSMutableArray<NSDictionary *> *exploitMatrix = [NSMutableArray new];
+        NSMutableDictionary<NSString *, NSNumber *> *candidateCounts = [@{@"Kernel": @0, @"PAC": @0, @"PPL": @0} mutableCopy];
+        NSMutableDictionary<NSString *, NSNumber *> *availableCounts = [@{@"Kernel": @0, @"PAC": @0, @"PPL": @0} mutableCopy];
+
+        for (NSString *frameworkName in frameworkNames ?: @[]) {
+            NSString *frameworkPath = [frameworksPath stringByAppendingPathComponent:frameworkName];
+            NSDictionary *frameworkInfo = [NSDictionary dictionaryWithContentsOfFile:[frameworkPath stringByAppendingPathComponent:@"Info.plist"]];
+            NSString *type = frameworkInfo[@"DPExploitType"];
+            NSDictionary *flavors = frameworkInfo[@"DPExploitFlavors"];
+            if (!type || !flavors) continue;
+
+            NSString *displayName = frameworkInfo[@"CFBundleDisplayName"] ?: [frameworkName stringByDeletingPathExtension];
+            for (NSString *flavorName in [[flavors allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
+                NSDictionary *flavor = flavors[flavorName];
+                NSArray *ranges = flavor[@"DPSupportedRanges"] ?: @[];
+                NSArray *supportedDevices = flavor[@"DPSupportedDevices"];
+                BOOL rangeMatch = NO;
+                for (NSDictionary *range in ranges) {
+                    NSString *start = range[@"Start"];
+                    NSString *end = range[@"End"];
+                    if (!start || !end) continue;
+                    BOOL afterStart = [targetVersion compare:start options:NSNumericSearch] != NSOrderedAscending;
+                    BOOL beforeEnd = [targetVersion compare:end options:NSNumericSearch] != NSOrderedDescending;
+                    if (afterStart && beforeEnd) {
+                        rangeMatch = YES;
+                        break;
+                    }
+                }
+
+                BOOL deviceMatch = supportedDevices == nil || containsTargetAlias(supportedDevices);
+                BOOL supported = rangeMatch && deviceMatch;
+                NSString *ruleKind = supported ? @"exclude" : @"include";
+                NSArray *rules = supported ? flavor[@"DPSupportExclude"] : flavor[@"DPSupportInclude"];
+                BOOL ruleConsidered = NO;
+                BOOL ruleApplied = NO;
+                for (NSDictionary *rule in rules ?: @[]) {
+                    if (!setAffectsTarget(rule)) continue;
+                    ruleConsidered = YES;
+                    NSArray *builds = rule[@"Builds"];
+                    if (builds == nil || [builds containsObject:targetBuild]) {
+                        supported = !supported;
+                        ruleApplied = YES;
+                    }
+                    break;
+                }
+
+                NSMutableArray<NSString *> *reasons = [NSMutableArray new];
+                if (!rangeMatch) [reasons addObject:@"version-outside-declared-ranges"];
+                if (!deviceMatch) [reasons addObject:@"device-family-not-declared"];
+                if (ruleConsidered && !ruleApplied) [reasons addObject:@"metadata-override-build-miss"];
+                if (ruleApplied && !supported) [reasons addObject:@"excluded-by-metadata-rule"];
+                if (supported) [reasons addObject:@"eligible-by-packaged-metadata"];
+
+                candidateCounts[type] = @(candidateCounts[type].unsignedIntegerValue + 1);
+                if (supported) availableCounts[type] = @(availableCounts[type].unsignedIntegerValue + 1);
+                [exploitMatrix addObject:@{
+                    @"framework": displayName,
+                    @"flavor": flavorName,
+                    @"type": type,
+                    @"priority": flavor[@"DPFlavorPriority"] ?: @0,
+                    @"range_match": @(rangeMatch),
+                    @"device_match": @(deviceMatch),
+                    @"override_kind": ruleKind,
+                    @"override_considered": @(ruleConsidered),
+                    @"override_applied": @(ruleApplied),
+                    @"supported": @(supported),
+                    @"declared_ranges": ranges,
+                    @"declared_devices": supportedDevices ?: @[],
+                    @"reasons": reasons,
+                }];
+            }
+        }
+
+        record(@"selector.kernel", availableCounts[@"Kernel"].unsignedIntegerValue ? @"AVAILABLE" : @"MISSING",
+               [NSString stringWithFormat:@"eligible=%@ candidates=%@", availableCounts[@"Kernel"], candidateCounts[@"Kernel"]]);
+        record(@"selector.pac", pacRequired ? (availableCounts[@"PAC"].unsignedIntegerValue ? @"AVAILABLE" : @"MISSING") : @"NOT_REQUIRED",
+               [NSString stringWithFormat:@"eligible=%@ candidates=%@", availableCounts[@"PAC"], candidateCounts[@"PAC"]]);
+        record(@"selector.ppl", pplRequired ? (availableCounts[@"PPL"].unsignedIntegerValue ? @"AVAILABLE" : @"MISSING") : @"NOT_REQUIRED",
+               [NSString stringWithFormat:@"eligible=%@ candidates=%@", availableCounts[@"PPL"], candidateCounts[@"PPL"]]);
+        NSString *selectorBlocker = availableCounts[@"Kernel"].unsignedIntegerValue == 0 ? @"kernel-exploit-missing" :
+            (pplRequired && availableCounts[@"PPL"].unsignedIntegerValue == 0 ? @"ppl-bypass-missing" : @"none");
+        record(@"selector.overall", [selectorBlocker isEqualToString:@"none"] ? @"METADATA_ELIGIBLE" : @"BLOCKED", selectorBlocker);
 
         record(@"kernel.runtime_read_write", @"MISSING", @"no-target-compatible-primitive");
         record(@"titan.command_buffers", @"BLOCKED", @"diagnostic-mode");
@@ -248,7 +374,7 @@
         record(@"sptm_txm.runtime_response", @"NOT_REACHED", @"no-protected-component-request-issued");
 
         NSDictionary *report = @{
-            @"schema": @"dopamine.a15-ios26.device-diagnostic.v1",
+            @"schema": @"dopamine.a15-ios26.device-diagnostic.v2",
             @"diagnostic_only": @YES,
             @"asserts_live_sptm_txm_response": @NO,
             @"target": @{
@@ -258,15 +384,20 @@
                 @"build": @"23A355",
             },
             @"txm_static_base": @"0xfffffff017004000",
+            @"exploit_matrix": exploitMatrix,
+            @"selector_counts": @{
+                @"candidates": candidateCounts,
+                @"eligible": availableCounts,
+            },
             @"events": events,
         };
 
         NSError *jsonError = nil;
         NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:&jsonError];
-        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic.json"];
+        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v2.json"];
         BOOL wroteReport = json != nil && [json writeToFile:outputPath options:NSDataWritingAtomic error:&jsonError];
         [self emitResearchDiagnosticEvent:wroteReport
-            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic.json"
+            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v2.json"
             : [NSString stringWithFormat:@"checkpoint=report.write status=FAIL error=%@", jsonError.localizedDescription ?: @"unknown"]];
 
         dispatch_async(dispatch_get_main_queue(), ^{

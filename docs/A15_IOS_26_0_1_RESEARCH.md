@@ -140,6 +140,21 @@ The seven reported checkpoints match the expected bounded state:
 - `titan.physical_write` and `sptm_txm.runtime_response` are `NOT_REACHED`.
 - `diagnostic_only` is true and `asserts_live_sptm_txm_response` is false.
 
+### Phase 2 metadata preflight
+
+The next bounded build advances the diagnosis without advancing execution. Its
+`dopamine.a15-ios26.device-diagnostic.v2` report reproduces the packaged exploit
+selection rules for every framework and flavor, recording version-range,
+device-family, and build-override decisions. It also records arm64e, PAC/PPL
+requirements, installation mode, and the presence of local kernelcache, SPTM,
+and TXM artifacts in the app bundle or Documents directory.
+
+This preflight only reads bundle metadata, environment properties, and file
+existence. The guarded method is statically prohibited from referencing exploit
+loading, `IOServiceOpen`, `IOConnectCall`, kernel read/write, command-buffer
+setup, or physical-write functions. Titan execution and live SPTM/TXM requests
+therefore remain blocked.
+
 The packaged Titan framework still declares support only for iOS `16.1` through
 `17.3.1`. Its Info.plist and Mach-O `LC_BUILD_VERSION` both now declare a
 minimum deployment target of iOS `16.1`. Although its historical device-family list contains A15, the exact
