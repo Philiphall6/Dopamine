@@ -14,6 +14,28 @@ jailbreak path on this exact device and OS combination.
 - Research state: `MAPPING_VALIDATED_TITAN_EXECUTION_BLOCKED`
 - Operating mode: bounded read-only observation and offline static analysis
 
+## Reproducible Diagnostic Build
+
+- Source branch: `codex/a15-ios26-diagnostic-20261014`
+- Source commit: `9009fd0ced07415d1693d110bb98b9bbe9d4c0f0`
+- GitHub Actions run: `38573660872` (successful, 2026-10-14)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-9009fd0.ipa`
+- Size: `55,436,031` bytes
+- SHA-256: `ED6CCD193359C687946CFB1166BFC875B865A1144AD2F6A7E23E30922F448EA4`
+- Application version: `3.0.11` (`com.opa334.Dopamine`)
+
+The packaged Titan framework still declares support only for iOS `16.1` through
+`17.3.1`. Although its historical device-family list contains A15, the exact
+iPhone14,2 / iOS 26.0.1 target remains excluded and the app-side research guard
+returns unsupported before exploit selection or GPU command-buffer setup.
+
+Offline/VM validation regenerated both static reports from the extracted
+kernelcache, GFX, SPTM, and TXM images. The adapted iOS 26 kernel and GFX
+relationships pass their static checks, as do the inspected SPTM/TXM
+relationships. These tests validate parsers, anchors, packaging, and safety
+guards only; a VM cannot reproduce the live A15 RTKit/AGX state, SPTM hardware,
+GPU memory behavior, MMIO access, or a physical-write primitive.
+
 ## Proven Facts
 
 - The `gfx-asc` IOService object is an `AppleARMIODevice`.
