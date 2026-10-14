@@ -1,12 +1,14 @@
-Titan static compatibility report
+# Titan static compatibility report
 
 This report reproduces Titan's exact masked instruction searches without
 executing Titan or modifying the firmware images.
 
 ## Summary
 
-- Kernel IOGPU/AGX patchfinders: **FAIL**
-- GFX patchfinders (at least one firmware slice): **FAIL**
+- Legacy kernel IOGPU/AGX patchfinders: **FAIL**
+- iOS 26 adapted kernel fallback (static only): **PASS**
+- Legacy GFX patchfinders (at least one firmware slice): **FAIL**
+- iOS 26 adapted GFX fallback (static only): **PASS**
 - Live GFX state and physical-write primitive: **NOT TESTED**
 
 First kernel failure: `AGXCommandQueue::processKernelCommand`
@@ -29,13 +31,14 @@ Filesets: `com.apple.iokit.IOGPUFamily`, `com.apple.AGXG14P`, `com.apple.kernel`
 
 ### iOS 26 AGX candidate
 
-Status: **CANDIDATE**. Evidence only: Titan currently models IOGPU.IOGPUMemoryMap as one direct offset, while this build appears to use a nested access.
+Status: **CANDIDATE**. Evidence only: XNU 25 keeps the MDSID command but replaces Titan's direct IOGPU.IOGPUMemoryMap field with a nested state/slot access.
 
-IOGPU.fence_value=0x60c8, intermediate_load=0xfffffff008859d1c, intermediate_offset=0x50, nested_slot_offset=0x152a0, buffer_marker=0xfffffff008859d60, IOGPU.buffer_offset=0x498
+helper.fence_value=0x60c8, intermediate_load=0xfffffff008859d1c, intermediate_offset=0x50, nested_slot_offset=0x152a0, buffer_marker=0xfffffff008859d60, helper.buffer_offset=0x498, AGXCommandQueue.IOGPUDevice=0x490, IOGPUDevice.MDSID_map=0x178, IOGPUDevice.IOGPU=0x48, IOGPU.dsids_supported=0xdabc, IOGPU.fence_value=0x15098, IOGPU.state=0xf020, IOGPUState.memory_map_slot=0x152a0, IOGPUMapSlot.memory_map=0x50, IOGPUState.buffer_offset=0x498
 
 ## GFX slice `a000`
 
 Overall static result: **FAIL**
+iOS 26 adapted static result: **PASS**
 
 | Finder | Status | First hit | Derived value(s) |
 |---|---:|---:|---|
@@ -49,11 +52,18 @@ Overall static result: **FAIL**
 | `power thread reference` | **PASS** | `0xffffff8000040274` | pointer=0xffffff8000129e68, file_value=0x0 |
 | `arm_arch_resume` | **PASS** | `0xffffff80000013f0` | literal_load=0xffffff80000014e0, pointer=0xffffff80000015e0, file_value=0xc8883005 |
 
+### iOS 26 hibernation candidate
+
+Status: **CANDIDATE**. Static-only ABI validation: X0 is the hibernation context and X1 is the FP context on this firmware build.
+
+arm_hb_context_addr_array=0xffffff8000078718, arm_fp_context_addr_array=0xffffff8000078720, arm_hb_context_descriptor=0xffffff80000784f8, arm_fp_context_descriptor=0xffffff8000078708, hibernation_context=0xffffff8000078390, fp_context=0xffffff8000078500
+
 Symbol-backed iOS 26 candidates (offline evidence only): `__arm_arch_hibernate_uat`=0xffffff800000125c, `__hb_context`=0xffffff8000078390, `__fp_context`=0xffffff8000078500, `_arm_hb_context`=0xffffff80000784f8, `_arm_fp_context`=0xffffff8000078708
 
 ## GFX slice `b000`
 
 Overall static result: **FAIL**
+iOS 26 adapted static result: **PASS**
 
 | Finder | Status | First hit | Derived value(s) |
 |---|---:|---:|---|
@@ -66,6 +76,12 @@ Overall static result: **FAIL**
 | `spin gadget` | **PASS** | `0xffffff800000008c` | - |
 | `power thread reference` | **PASS** | `0xffffff8000047e10` | pointer=0xffffff8000131e68, file_value=0x0 |
 | `arm_arch_resume` | **PASS** | `0xffffff80000013f0` | literal_load=0xffffff80000014e0, pointer=0xffffff80000015e0, file_value=0xc8883005 |
+
+### iOS 26 hibernation candidate
+
+Status: **CANDIDATE**. Static-only ABI validation: X0 is the hibernation context and X1 is the FP context on this firmware build.
+
+arm_hb_context_addr_array=0xffffff8000080718, arm_fp_context_addr_array=0xffffff8000080720, arm_hb_context_descriptor=0xffffff80000804f8, arm_fp_context_descriptor=0xffffff8000080708, hibernation_context=0xffffff8000080390, fp_context=0xffffff8000080500
 
 Symbol-backed iOS 26 candidates (offline evidence only): `__arm_arch_hibernate_uat`=0xffffff800000125c, `__hb_context`=0xffffff8000080390, `__fp_context`=0xffffff8000080500, `_arm_hb_context`=0xffffff80000804f8, `_arm_fp_context`=0xffffff8000080708
 
