@@ -54,9 +54,33 @@ GPU memory behavior, MMIO access, or a physical-write primitive.
   `dictEntry` for this kernel.
 - A bounded live probe validated `count=20`, `capacity=24`, and the entry table
   pointer for the AppleARMIODevice property dictionary.
-- Exact-length OSSymbol reads identified dictionary entry 17 as
-  `IODeviceMemory`; entry 14 is `segment-ranges` and entry 18 is
-  `IOReportLegend`.
+- Exact-length OSSymbol reads identified dictionary entry 13 as
+  `segment-names`, entry 14 as `segment-ranges`, entry 17 as
+  `IODeviceMemory`, and entry 18 as `IOReportLegend`.
+- Both segment-property values are `OSData` objects. Their reconstructed
+  unslid object-vtable pointer is `0xfffffff007aaad98`, and the target kernel
+  registers the class with size `0x28`. Target-kernel methods prove
+  `length=+0xc`, `capacity/external-sentinel=+0x10`,
+  `capacityIncrement=+0x14`, `data=+0x18`, and
+  `owner/deallocator=+0x20`.
+- The live `segment-ranges` object has length `0x40` and the live
+  `segment-names` object has length `0xe`. Both use the `0xffffffff` external
+  buffer sentinel at `+0x10`.
+- Static analysis of `RTBuddy` function `0xfffffff00a51214c` proves that it
+  divides the `segment-ranges` length by `0x20` and consumes one 32-byte
+  descriptor per iteration. The bounded 64-byte capture therefore contains
+  exactly two descriptors:
+  - descriptor 0: `+0x00=0x8007ac000`,
+    `+0x08=0xffffff8000000000`, `+0x10=0x8007ac000`,
+    `length=0x5c000`, raw flags `0x1`;
+  - descriptor 1: `+0x00=0x802048000`,
+    `+0x08=0xffffff800005c000`, `+0x10=0x802048000`,
+    `length=0xd8000`, raw flags `0x0`.
+- `RTBuddy` passes those fields to factory `0xfffffff00a505df0`, which stores
+  them at object offsets `+0x18`, `+0x28`, `+0x20`, and `+0x30`
+  respectively, with transformed flags at `+0x40`. This proves the structure
+  and lengths, but the semantic names of the three address fields remain
+  unresolved.
 - The `IODeviceMemory` value is an `OSArray` with exactly two elements. Static
   kernel analysis identifies both elements as `IOGeneralMemoryDescriptor`
   objects.
@@ -94,6 +118,13 @@ GPU memory behavior, MMIO access, or a physical-write primitive.
   configuration and confirming HTTP `403` after every successful capture.
 - String reads were limited to the exact length proven by each OSSymbol's
   packed length field.
+- `segment-ranges` metadata was read first. Only after its `OSData` length was
+  validated as `0x40` did a second probe read exactly eight 64-bit words, for
+  a total of 64 bytes and two statically proven 32-byte descriptors.
+- The `segment-names` key and `OSData` metadata were validated independently.
+  A subsequent exact 14-byte payload read closed the connection before a
+  capture file was produced. The disabled configuration was restored over USB
+  and the payload read was not retried automatically.
 - OSArray enumeration was limited to its proven count of two.
 - IOGeneralMemoryDescriptor reads were limited to fields validated by Apple XNU
   source and the target kernel's virtual methods.
@@ -139,6 +170,10 @@ physical-write primitive and must not be interpreted as exploit support.
   proven.
 - The remaining target-specific AGX relationships may replace legacy Titan
   patterns that no longer match this kernel and GFX firmware.
+- The two live `segment-ranges` descriptors may describe the RTKit firmware
+  segments needed by later diagnostic reasoning, but their three address-field
+  roles and the corresponding 14-byte `segment-names` payload are not yet
+  proven.
 
 None of these hypotheses is permission to invoke mapping methods, dereference
 MMIO, create a GPU command queue, or perform a write.
@@ -166,13 +201,16 @@ Consequences:
 
 1. Validate the target-specific `IOMemoryMap` accessor anchor against
    additional iOS 26 kernels before treating it as a family-wide finder.
-2. Validate each remaining iOS 26 AGX patchfinder result against the target
+2. Resolve the three address-field roles in the two 32-byte RTBuddy segment
+   descriptors from static call sites before assigning physical, device, or
+   virtual-address semantics.
+3. Validate each remaining iOS 26 AGX patchfinder result against the target
    kernel and GFX firmware without running a GPU command queue.
-3. Keep all live probes count-bounded, read-only, and followed by restoration
+4. Keep all live probes count-bounded, read-only, and followed by restoration
    of the disabled configuration.
-4. Review each later Titan stage in isolation before considering any on-device
+5. Review each later Titan stage in isolation before considering any on-device
    execution.
-5. Change support metadata only after a separate end-to-end safety and
+6. Change support metadata only after a separate end-to-end safety and
    correctness review.
 
 ## Application Policy

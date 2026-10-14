@@ -1317,6 +1317,66 @@ def render_markdown(report: dict) -> str:
                     f"with `{io_registry.get('io_device_memory_count', 'unknown')}` entries.",
                 ]
             )
+            segment_properties = io_registry.get("segment_properties")
+            if isinstance(segment_properties, dict):
+                segment_names = segment_properties.get("segment_names", {})
+                segment_ranges = segment_properties.get("segment_ranges", {})
+                osdata_layout = segment_properties.get("osdata_layout", {})
+                lines.extend(
+                    [
+                        "",
+                        "### RTBuddy segment properties",
+                        "",
+                        "The adjacent IORegistry properties were identified by exact-length "
+                        "key reads. Both values are target-kernel `OSData` objects. The ranges "
+                        "payload was read only after its length was validated.",
+                        "",
+                        f"Value class: `{segment_properties.get('value_class', 'unknown')}`; "
+                        f"vtable `{segment_properties.get('value_vtable_unslid', 'unknown')}`; "
+                        f"object size `{segment_properties.get('object_size', 'unknown')}`.",
+                        "OSData layout: "
+                        f"length `{osdata_layout.get('length', 'unknown')}`, "
+                        f"capacity/sentinel "
+                        f"`{osdata_layout.get('capacity_or_external_sentinel', 'unknown')}`, "
+                        f"data `{osdata_layout.get('data', 'unknown')}`.",
+                        f"`segment-names`: key index "
+                        f"`{segment_names.get('key_index', 'unknown')}`, length "
+                        f"`{segment_names.get('length', 'unknown')}`, content "
+                        f"**{segment_names.get('content_status', 'UNKNOWN')}**.",
+                        f"`segment-ranges`: key index "
+                        f"`{segment_ranges.get('key_index', 'unknown')}`, length "
+                        f"`{segment_ranges.get('length', 'unknown')}`, descriptor size "
+                        f"`{segment_ranges.get('descriptor_size', 'unknown')}`, count "
+                        f"`{segment_ranges.get('descriptor_count', 'unknown')}`, semantics "
+                        f"**{segment_ranges.get('semantic_status', 'UNKNOWN')}**.",
+                    ]
+                )
+                segment_descriptors = segment_ranges.get("descriptors", [])
+                if segment_descriptors:
+                    lines.extend(
+                        [
+                            "",
+                            "| Index | Field +0x00 | Field +0x08 | Field +0x10 | Length | Raw flags |",
+                            "|---:|---:|---:|---:|---:|---:|",
+                        ]
+                    )
+                    for descriptor in segment_descriptors:
+                        lines.append(
+                            f"| `{descriptor.get('index', 'unknown')}` | "
+                            f"`{descriptor.get('field_00', 'unknown')}` | "
+                            f"`{descriptor.get('field_08', 'unknown')}` | "
+                            f"`{descriptor.get('field_10', 'unknown')}` | "
+                            f"`{descriptor.get('length', 'unknown')}` | "
+                            f"`{descriptor.get('flags_raw', 'unknown')}` |"
+                        )
+                if segment_properties.get("probe_guardrail"):
+                    lines.extend(
+                        [
+                            "",
+                            f"Segment-property guardrail: "
+                            f"{segment_properties['probe_guardrail']}",
+                        ]
+                    )
             descriptors = io_registry.get("memory_descriptors", [])
             if descriptors:
                 lines.extend(

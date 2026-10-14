@@ -50,6 +50,56 @@
     },
     "metadata_probe_status": "VALIDATED",
     "property_count": 20,
+    "segment_properties": {
+      "value_class": "OSData",
+      "value_vtable_unslid": "0xfffffff007aaad98",
+      "object_size": "0x28",
+      "osdata_layout": {
+        "length": "0xc",
+        "capacity_or_external_sentinel": "0x10",
+        "capacity_increment": "0x14",
+        "data": "0x18",
+        "owner_or_deallocator": "0x20"
+      },
+      "segment_names": {
+        "key_index": 13,
+        "key": "segment-names",
+        "length": "0xe",
+        "metadata_status": "VALIDATED",
+        "content_status": "NOT_CAPTURED_CONNECTION_CLOSED"
+      },
+      "segment_ranges": {
+        "key_index": 14,
+        "key": "segment-ranges",
+        "length": "0x40",
+        "descriptor_size": "0x20",
+        "descriptor_count": 2,
+        "consumer_function": "0xfffffff00a51214c",
+        "descriptor_factory": "0xfffffff00a505df0",
+        "descriptors": [
+          {
+            "index": 0,
+            "field_00": "0x8007ac000",
+            "field_08": "0xffffff8000000000",
+            "field_10": "0x8007ac000",
+            "length": "0x5c000",
+            "flags_raw": "0x1",
+            "flags_normalized": "0x2"
+          },
+          {
+            "index": 1,
+            "field_00": "0x802048000",
+            "field_08": "0xffffff800005c000",
+            "field_10": "0x802048000",
+            "length": "0xd8000",
+            "flags_raw": "0x0",
+            "flags_normalized": "0x2"
+          }
+        ],
+        "semantic_status": "STRUCTURE_VALIDATED_FIELD_ROLES_UNRESOLVED"
+      },
+      "probe_guardrail": "The ranges payload was read only after its OSData length was validated as 0x40, and the read stopped exactly at 64 bytes. The exact 14-byte names-payload attempt closed the connection before producing a capture, so it was not retried. The probe configuration was restored to disabled over USB after every attempt."
+    },
     "io_device_memory_status": "FOUND",
     "io_device_memory_key_index": 17,
     "io_device_memory_value_class": "OSArray",
