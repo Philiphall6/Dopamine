@@ -319,6 +319,15 @@ def derive_wire_range(image: MappedImage, hit: int) -> dict:
     }
 
 
+def derive_iomemorymap_address_accessor(image: MappedImage, hit: int) -> dict:
+    value = decode_ldr_str_offset(image.read_u32(hit + 4))
+    return {
+        "accessor": hit,
+        "IOMemoryMap.fAddress": value,
+        "valid": 0 < value <= 0x100,
+    }
+
+
 def derive_userclient_vtable(image: MappedImage, hit: int) -> dict:
     adrp_address = None
     for index in range(30):
@@ -379,6 +388,33 @@ KERNEL_PATTERNS = {
         (0xF9400008, 0x8B020108),
         (0xFFC003FF, 0xFFFFFFFF),
     ),
+    "map_address_ios26": Pattern(
+        "iOS 26 IOMemoryMap address accessor",
+        (
+            0xD503245F,
+            0xF9400000,
+            0xD65F03C0,
+            0xD503237F,
+            0xD10003FF,
+            0xA90157F6,
+            0xA9024FF4,
+            0xA9037BFD,
+            0x9100C3FD,
+            0xAA0003F3,
+        ),
+        (
+            0xFFFFFFFF,
+            0xFFC003FF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFC003FF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+        ),
+    ),
     "vtable": Pattern(
         "AGXDeviceUserClient vtable reference",
         (0xF2F9B431, 0xDAC10A30, 0xF9000010, 0x3904C01F),
@@ -416,6 +452,12 @@ def analyze_kernel(path: pathlib.Path) -> dict:
         pattern_result(iogpu, "__TEXT_EXEC", KERNEL_PATTERNS["handles"], derive_alloc_handles),
         pattern_result(iogpu, "__TEXT_EXEC", KERNEL_PATTERNS["kernel_data"], derive_get_kernel_data),
         pattern_result(kernel, "__TEXT_EXEC", KERNEL_PATTERNS["wire"], derive_wire_range),
+        pattern_result(
+            kernel,
+            "__TEXT_EXEC",
+            KERNEL_PATTERNS["map_address_ios26"],
+            derive_iomemorymap_address_accessor,
+        ),
         pattern_result(agxg, "__TEXT_EXEC", KERNEL_PATTERNS["vtable"], derive_userclient_vtable),
     ]
     first_failure = next((item["name"] for item in checks if item["status"] != "PASS"), None)

@@ -70,6 +70,7 @@ def main() -> int:
     )
     for marker in ("0xfffffff007aaaf58", "dictionary=+0x20", "16-byte"):
         require(marker in report, f"report is missing OSDictionary evidence: {marker}")
+    require("fAddress=+0x28" in report, "report is missing the validated map offset")
 
     for localization in ("en", "fr"):
         strings = (ROOT / f"Application/Dopamine/{localization}.lproj/Localizable.strings").read_text()
@@ -84,6 +85,11 @@ def main() -> int:
     require(
         "fAddress == 0 || fAddress > 0x100" in kernel_patchfinder,
         "legacy IOMemoryMap offset candidates are no longer range-checked",
+    )
+    require(
+        "failed to find unique iOS 26 IOMemoryMap address accessor"
+        in kernel_patchfinder,
+        "target-specific IOMemoryMap address accessor fallback is missing",
     )
     require(
         "kpf_fileset_entry_patchfind_text_unique" in kernel_patchfinder,

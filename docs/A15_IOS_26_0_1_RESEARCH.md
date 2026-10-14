@@ -93,6 +93,9 @@ jailbreak path on this exact device and OS combination.
 - The in-app legacy `IOMemoryMap::wireRange` finder now rejects zero or
   implausibly large field offsets, so the target's false `+0x260` match cannot
   silently enter Titan's offset table.
+- Its iOS 26 fallback now requires one unique ten-instruction accessor anchor
+  in the target kernel and derives `fAddress=+0x28` from the matched `LDR`;
+  there is no unanchored hard-coded field offset.
 - Titan refuses iOS 26 command-buffer setup and direct IORVBAR/MMIO mapping
   while the later Titan execution chain remains unvalidated.
 
@@ -131,8 +134,8 @@ Consequences:
 
 ## Next Steps
 
-1. Derive a robust target-specific finder for the independently proven
-   `fAddress=+0x28` relationship; do not replace it with an unanchored constant.
+1. Validate the target-specific `IOMemoryMap` accessor anchor against
+   additional iOS 26 kernels before treating it as a family-wide finder.
 2. Validate each remaining iOS 26 AGX patchfinder result against the target
    kernel and GFX firmware without running a GPU command queue.
 3. Keep all live probes count-bounded, read-only, and followed by restoration
