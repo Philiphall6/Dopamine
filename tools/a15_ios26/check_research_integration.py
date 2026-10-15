@@ -254,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_CENSUS_BUILT" in report,
-        "report does not record the bounded IPC census state",
+        "ACTIVE_TITAN_PROBE_IPC_LAYOUT_SOURCE_READY" in report,
+        "report does not record the bounded IPC layout state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
@@ -353,6 +353,9 @@ def main() -> int:
         "TITAN_IOS26_IPC_ENTRY_SIZE",
         "TITAN_IOS26_IPC_PORT_KOBJECT_OFFSET",
         "TITAN_IOS26_IOMACHPORT_OBJECT_OFFSET",
+        "TITAN_IOS26_TASK_LAYOUT_START",
+        "TITAN_IOS26_TASK_LAYOUT_END",
+        "TITAN_IOS26_IPC_SPACE_LAYOUT_END",
         "ipc_space_table_exact",
         "process_census_open_userclients",
         "titan_read_pointer_exact",
@@ -363,8 +366,17 @@ def main() -> int:
         "titan.ipc-census TYPE",
         "titan.ipc-census SUMMARY",
         "table-stable=%s pid-stable=%s",
+        "titan.ipc-layout START",
+        "titan.ipc-layout WORD",
+        "titan.ipc-layout STOP read-only words-only; no IPC object followed",
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
+    layout_start = ipc_port.find("static void titan_log_layout_window")
+    layout_end = ipc_port.find("static int create_new_send_once_port", layout_start)
+    require(layout_start >= 0 and layout_end > layout_start, "IPC layout probe body is missing")
+    layout_body = ipc_port[layout_start:layout_end]
+    for forbidden in ("kwrite", "task_copy_ipc_entry", "mach_port_", "IOConnectCall"):
+        require(forbidden not in layout_body, f"read-only IPC layout probe contains {forbidden}")
     census_start = ipc_port.find("static uint64_t process_census_open_userclients")
     census_end = ipc_port.find("uint64_t process_find_open_userclient", census_start)
     require(census_start >= 0 and census_end > census_start, "IPC census body is missing")

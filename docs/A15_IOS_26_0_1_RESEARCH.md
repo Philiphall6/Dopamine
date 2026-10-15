@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_LAYOUT_SOURCE_READY`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
@@ -31,8 +31,9 @@ descriptor fields, the bounded process-name discovery, and the complete IPC
 census marker set: `START`, `TYPE`, `CANDIDATE`, `SUMMARY`, and `STOP`. It also
 contains the explicit `task_copy_ipc_entry not reached` stop marker. The
 `a720b8a` process-lookup build passed its intended lookup checks on-device;
-`8beefad` packages the resulting read-only IPC census and awaits its first
-device run.
+`8beefad` packages the resulting read-only IPC census. Its first device run is
+recorded below; the follow-up source adds a bounded word-layout probe for the
+newly isolated `ipc_space` failure.
 
 ## First Active Device Result
 
@@ -178,6 +179,29 @@ vtable is seen.
 It performs no kernel write, right transfer, command submission, MMIO access,
 physical write, privilege change, or bootstrap operation.
 
+## Sixth Active Device Result
+
+The IPC-census `8beefad` build was run on the exact target on 2026-10-15 at
+16:55. ClearSword again established and validated the kernel primitive. Titan
+passed the target gate, kernel patchfinder, and complete IORVBAR traversal. It
+also captured the live signed `IOMachPort` wrapper vtable and normalized it to
+`0xfffffff04bb60b18`.
+
+The bounded process lookup again resolved `backboardd` uniquely at proc
+`0xffffffe08fa67b40`, pid 72, this time after 349 traversed processes. The
+derived task address is `proc + 0x748`. The exact-read IPC census then stopped
+before scanning any entry because the current `task.itk_space` / `ipc_space`
+path produced no decodable table at the asserted `ipc_space + 0x48` layout:
+`table=0x0`, `size=0x0`, `entry-size=0x18`. The explicit read-only stop ran and
+`task_copy_ipc_entry` was not reached. The device did not panic or reboot.
+
+This moves the blocker earlier than the legacy port-type test. The next source
+revision records the exact raw table word before decode, compares target and
+self `task.itk_space`, and logs fixed eight-byte windows at `task +
+[0x2f0,0x330]` and `ipc_space + [0x00,0x80]`. It does not follow any IPC object
+from those words. The output distinguishes a stale `task.itk_space` offset from
+a moved `ipc_space` table field or changed SMR encoding.
+
 ## End-to-End Chain Status
 
 | Stage | Status | Evidence or blocker |
@@ -264,11 +288,12 @@ response.
 
 The source records a durable checkpoint immediately before every active
 boundary, including command-buffer setup, the IORVBAR read, firmware copying,
-both patchfinders, target-job mapping, and the GFX ROP trigger. The exact-read
-run passed the active kernel patchfinder and complete IORVBAR object graph, then
-stopped cleanly on stale descriptor field offsets. Later stages remain
-`DEVICE_RESULT_PENDING` until the descriptor-range IPA is run; they must not be
-inferred from the static captures.
+both patchfinders, target-job mapping, and the GFX ROP trigger. The latest
+exact-read run passed the active kernel patchfinder, complete IORVBAR object
+graph, and `backboardd` lookup, then stopped cleanly before IPC entry scanning
+because the asserted XNU 25 `ipc_space` table layout did not decode. Later
+stages remain `DEVICE_RESULT_PENDING`; they must not be inferred from static
+captures.
 
 | Observable checkpoint | Current target result |
 |---|---|
@@ -279,8 +304,9 @@ inferred from the static captures.
 | RTBuddy/segment discovery | `READ_ONLY_PASS` from bounded capture |
 | GFX firmware patchfinder | `STATIC_PASS` on the extracted image |
 | IORVBAR object traversal | `ACTIVE_PASS`; exact descriptor and map validation completed on-device |
-| `backboardd` process lookup | `ACTIVE_PASS`; pid 72, unique `proc`, 2730-entry IPC table |
-| Open IOGPU userclient lookup | `ACTIVE_BLOCKED`; bounded exact-read IPC census source ready |
+| `backboardd` process lookup | `ACTIVE_PASS`; pid 72 and unique `proc` reproduced |
+| Exact IPC-table decode | `ACTIVE_BLOCKED`; `ipc_space + 0x48` yielded no decodable table in the exact-read census |
+| Open IOGPU userclient lookup | `NOT_REACHED`; bounded IPC layout source ready |
 | GFX physical addresses and translation root | `DEVICE_RESULT_PENDING`; not reached in first run |
 | Controlled mapping window | `DEVICE_RESULT_PENDING` |
 | Titan `physwritebuf` publication | `DEVICE_RESULT_PENDING` |
@@ -941,16 +967,33 @@ Consequences:
   IPC table; it does not validate command queues, RTKit parsing, GFX ROP, or an
   SPTM/TXM path.
 
+### IPC_SPACE_LAYOUT_DISCOVERY_REQUIRED
+
+The `8beefad` exact-read census proves that process discovery is no longer the
+first blocker. `backboardd` resolves consistently, but the asserted
+`task.itk_space` and `ipc_space.table=0x48` path does not yield a decodable IPC
+table in the exact-read path. The older non-exact decoder's earlier 2730-entry
+result is therefore evidence to compare, not a layout contract to trust.
+
+Consequences:
+
+- Record the raw table word even when pointer or size decoding fails.
+- Compare the target task and IPC-space words with the current Dopamine process
+  under the same exact-read primitive.
+- Bound task inspection to `+0x2f0..+0x330` and IPC-space inspection to
+  `+0x00..+0x80`, in eight-byte words.
+- Do not follow a port, kobject, wrapper, or userclient from layout-probe words.
+- Keep the unconditional exact-target stop before `task_copy_ipc_entry`.
+
 ## Next Steps
 
-1. Build and install the bounded process-name discovery probe.
-2. Run that active probe once and recover
-   `Documents/a15-ios26-active-probe.jsonl` after completion, process exit, or
-   reboot.
-3. Require a unique `titan.proc-by-name PASS` for `backboardd`, including a
-   plausible pid, before interpreting any IPC-table result.
-4. Identify the last `PASS` and following `START`/`FAIL` pair before changing
-   any later stage.
+1. Build the bounded IPC-layout revision and verify its packaged marker set.
+2. Run it once on the exact target and recover the `titan.ipc-layout START`,
+   `WORD`, and `STOP` records.
+3. Compare target and self task/IPC-space windows offline before selecting any
+   replacement offset or decoder.
+4. Require a stable exact-read IPC table before re-enabling the read-only port
+   census; do not infer one from the historical decoder.
 5. Keep the normal jailbreak, physrw, privilege, trust-cache, and bootstrap
    stages disabled until Titan's physical-write publication is independently
    reproduced.
