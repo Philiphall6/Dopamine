@@ -77,6 +77,8 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
   wrappers
 - SPTM `GENTER`/`GEXIT` transfer counts and directly referenced dispatch
   diagnostic anchors
+- dispatch anchor function candidates, direct caller/branch ingress, and
+  bounded comparison/conditional-branch guards
 
 These results show patchfinder compatibility for the inspected paths. They do
 not provide the unrestricted physical-write primitive required by Dopamine's

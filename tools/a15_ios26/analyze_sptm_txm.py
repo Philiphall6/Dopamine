@@ -732,8 +732,135 @@ def analyze_txm(image: MachOImage) -> dict:
     return result
 
 
+def _collect_dispatch_guards(
+    image: MachOImage,
+    function: int,
+    instruction_limit: int = 384,
+    result_limit: int = 64,
+) -> list[dict]:
+    """Collect bounded control-flow guards without assigning semantic names."""
+
+    start_index = image._instruction_index.get(function)
+    if start_index is None:
+        return []
+
+    guards = []
+    for instruction in image.instructions[
+        start_index : start_index + instruction_limit
+    ]:
+        if (
+            instruction.address != function
+            and instruction.mnemonic in {"pacibsp", "paciasp"}
+        ):
+            break
+
+        mnemonic = instruction.mnemonic
+        is_comparison = mnemonic in {"cmp", "cmn", "tst", "ccmp", "ccmn"}
+        is_conditional_branch = mnemonic.startswith("b.") or mnemonic in {
+            "cbz",
+            "cbnz",
+            "tbz",
+            "tbnz",
+        }
+        if not is_comparison and not is_conditional_branch:
+            continue
+
+        targets = [
+            image._imm(operand)
+            for operand in instruction.operands
+            if operand.type == capstone.CS_OP_IMM
+        ]
+        guards.append(
+            {
+                "address": instruction.address,
+                "mnemonic": mnemonic,
+                "operands": instruction.op_str,
+                "branch_target": (
+                    targets[-1] if is_conditional_branch and targets else None
+                ),
+            }
+        )
+        if len(guards) >= result_limit:
+            break
+    return guards
+
+
+def _annotate_dispatch_anchors(
+    image: MachOImage, entries: Sequence[dict]
+) -> tuple[list[dict], list[dict]]:
+    """Attach bounded function and ingress metadata to dispatch string xrefs."""
+
+    annotated = []
+    functions: dict[int, dict] = {}
+    for entry in entries:
+        references = entry.get("references", [])
+        function_candidates = sorted(
+            {
+                function
+                for reference in references
+                if (
+                    function := image.function_start(reference["address"])
+                )
+                is not None
+            }
+        )
+        annotated.append(
+            {
+                **entry,
+                "function_candidates": function_candidates,
+                "windows": [
+                    image.window(reference["address"], before=12, after=8)
+                    for reference in references
+                ],
+            }
+        )
+
+        for function in function_candidates:
+            summary = functions.setdefault(
+                function,
+                {
+                    "function": function,
+                    "anchors": set(),
+                    "anchor_references": set(),
+                },
+            )
+            summary["anchors"].add(entry["value"])
+            summary["anchor_references"].update(
+                reference["address"] for reference in references
+            )
+
+    summaries = []
+    for function in sorted(functions):
+        summary = functions[function]
+        direct_calls = image.calls_to(function)
+        direct_call_set = set(direct_calls)
+        summaries.append(
+            {
+                "function": function,
+                "anchors": sorted(summary["anchors"]),
+                "anchor_references": sorted(summary["anchor_references"]),
+                "direct_calls": direct_calls,
+                "direct_branches": [
+                    source
+                    for source in image.branches_to(function)
+                    if source not in direct_call_set
+                ],
+                "guards": _collect_dispatch_guards(image, function),
+                "entry_window": image.window(function, before=0, after=24),
+            }
+        )
+    return annotated, summaries
+
+
 def analyze_sptm(image: MachOImage) -> dict:
     anchors = ("papt_ranges_update",)
+    dispatch_anchors, dispatch_functions = _annotate_dispatch_anchors(
+        image,
+        image.referenced_strings(
+            r"register_dispatch_table|dispatch_table_lookup|dispatch_state_machine|"
+            r"genter_dispatch_entry|sptm_dispatch|endpoint_id"
+        ),
+    )
     result: dict = {
         "path": str(image.path),
         "imagebase": image.imagebase,
@@ -741,10 +868,8 @@ def analyze_sptm(image: MachOImage) -> dict:
             "genter": _collect_sptm_transfer_entries(image, "genter"),
             "gexit": _collect_sptm_transfer_entries(image, "gexit"),
         },
-        "dispatch_anchors": image.referenced_strings(
-            r"dispatch_table_lookup|dispatch_state_machine|"
-            r"genter_dispatch_entry|sptm_dispatch|endpoint_id"
-        ),
+        "dispatch_anchors": dispatch_anchors,
+        "dispatch_functions": dispatch_functions,
         "anchors": {},
         "papt_compressed_tables": {},
         "related_referenced_strings": image.referenced_strings(
@@ -1422,10 +1547,50 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
             f"`{_format_address(reference['address'])}`"
             for reference in entry["references"]
         )
+        functions = ", ".join(
+            f"`{_format_address(function)}`"
+            for function in entry.get("function_candidates", [])
+        )
         lines.append(
             f"- `{entry['value']}` at "
-            f"`{_format_address(entry['address'])}`; references: {references}"
+            f"`{_format_address(entry['address'])}`; references: {references}; "
+            f"functions: {functions or 'none'}"
         )
+
+    lines.extend(("", "### Dispatch function candidates", ""))
+    dispatch_functions = sptm.get("dispatch_functions", [])
+    if not dispatch_functions:
+        lines.append("- No dispatch function candidate")
+    for entry in dispatch_functions:
+        anchors = ", ".join(f"`{value}`" for value in entry["anchors"])
+        calls = ", ".join(
+            f"`{_format_address(address)}`" for address in entry["direct_calls"]
+        )
+        branches = ", ".join(
+            f"`{_format_address(address)}`"
+            for address in entry["direct_branches"]
+        )
+        lines.extend(
+            (
+                f"- Function `{_format_address(entry['function'])}`; "
+                f"anchors: {anchors}",
+                f"  Direct calls: {calls or 'none'}",
+                f"  Direct branches: {branches or 'none'}",
+                f"  Bounded guards: {len(entry['guards'])}",
+            )
+        )
+        for guard in entry["guards"]:
+            target = (
+                "; target `" + _format_address(guard["branch_target"]) + "`"
+                if guard["branch_target"] is not None
+                else ""
+            )
+            lines.append(
+                f"  - `{_format_address(guard['address'])}`: "
+                f"`{guard['mnemonic']} {guard['operands']}`{target}"
+            )
+        _append_window(lines, entry["entry_window"])
+
     for anchor, entries in sptm["anchors"].items():
         if not entries:
             lines.append(f"- Anchor `{anchor}`: missing")

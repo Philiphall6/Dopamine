@@ -280,6 +280,28 @@ absence.
 | `sptm-txm-static-report-v5.json` | `8BB5C33B082DB4CDAECE6F4730A92A2136B0403BF97DB17AF27F5959340ABBA1` |
 | `sptm-txm-static-report-v5.md` | `B74446AD9B4C18C3EB36BC98FB5B0B5BEA0D250F729AD8716159D8ECCEEAD5A5` |
 
+## Symmetric analyzer v6 dispatch guards
+
+The v6 reports group dispatch diagnostic xrefs by candidate function and add
+direct callers, branch ingress, and bounded control-flow guards. They confirm
+that the table-ID and endpoint validators named by 23A355 have structural
+counterparts in 21B91 even though the older image lacks the same strings.
+
+Both builds bound registered table IDs to `0..15`. Endpoint policy differs:
+21B91 admits an effective low-byte range of `0..31`, uses 8-byte entries, and
+separately bounds the extracted table ID to `0..7`; 23A355 applies
+`(x0 & 0xfe) < 0x32`, uses 16-byte entries, and rejects null tables and
+entries. The state/event bounds grow from `17/12` to `23/15`.
+
+These are contract deltas, not an identified bypass or runtime response.
+
+| v6 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v6.json` | `78BE444A6C684E4A8511079563EDCAC51A45179876CB9A9B1ACFF303DD49F812` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v6.md` | `728EF3C926A43704CF0C9F0110590A161EADB5348673B38B829A85846D4F60B0` |
+| `sptm-txm-static-report-v6.json` | `175D130EB675592E8CC6EAD719E56A0166D32F52297232E2F0C7E03C30F4283B` |
+| `sptm-txm-static-report-v6.md` | `43F5B9CB13BE7C7431B69EDF82E9603A5B5F48F0E399A8AD45F1A83ED19FF27A` |
+
 ## Created artifacts
 
 All extracted files and generated reports are under:

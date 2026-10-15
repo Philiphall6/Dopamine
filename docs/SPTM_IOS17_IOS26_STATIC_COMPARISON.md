@@ -134,9 +134,41 @@ small set of dispatch diagnostic strings:
 The extra 23A355 `GEXIT` sites and named validator references are bounded
 control-flow comparison candidates. A missing diagnostic string on 21B91 does
 not prove the equivalent validation logic is absent, and an added string does
-not identify a bypass branch. The next comparison must recover function
-boundaries and callers around these references on both builds before assigning
-semantics.
+not identify a bypass branch.
+
+## Symmetric Dispatch Guard Comparison
+
+The v6 report recovers candidate functions, direct callers, direct branch
+ingress, and bounded comparison/conditional-branch guards for the same anchor
+set on both images. The added 23A355 validator names identify inlined checks;
+they are not separately called functions. Their structural 21B91 counterparts
+are present without those names.
+
+| Role | 21B91 | 23A355 | Static delta |
+| --- | --- | --- | --- |
+| Main table registration | `0xfffffff00708891c`, 4 direct calls | `0xfffffff0270cb73c`, 5 direct calls | Same role; 23A355 also carries the named table-ID assertion |
+| Direct table registration | `0xfffffff0070892b4`, 3 direct calls | `0xfffffff0270cc1ac`, 2 direct calls | Both require table ID `0..15`; 23A355 forwards into the main registrar |
+| State machine / lookup | `0xfffffff007088ea8` | `0xfffffff0270cbb94` | State bound grows from `<17` to `<23`; event bound grows from `<12` to `<15` |
+| SPTM dispatch | `0xfffffff0070894fc` | `0xfffffff0270cc2b0` | Endpoint representation and entry width change |
+| GENTER dispatch entry | effective branch entry `0xfffffff0070893a4`; diagnostic candidate `0xfffffff0070893c4` | `0xfffffff0270cc43c` | 23A355 adds explicit endpoint-derived events `12`, `13`, and `14` |
+
+The table-ID policy is continuous: both builds reject IDs above `15`, require
+an unused slot, and check dispatch state before registration. The endpoint
+policy is not byte-for-byte continuous:
+
+- 21B91 rejects a low endpoint byte with any of bits `5..7` set, giving an
+  effective `0..31` range; it also bounds the extracted table ID to `0..7`,
+  indexes 8-byte endpoint entries, and rejects a null entry.
+- 23A355 rejects when `(x0 & 0xfe) >= 0x32`, indexes 16-byte endpoint entries,
+  and rejects a null table or null entry. Its registration path separately
+  enforces the `0..15` table-ID bound.
+- The state-machine action transfer remains authenticated on both builds. The
+  newer image has larger state/event spaces and more direct ingress branches.
+
+This closes the v5 ambiguity: the named iOS 26 checks are strengthened or
+restructured counterparts of checks already present on iOS 17, not a newly
+isolated residual bypass branch. Static evidence still cannot establish a
+selector ABI, accepted protected request, or exploitable control-flow path.
 
 ## Result
 
@@ -189,6 +221,16 @@ The v5 artifacts add the SPTM transfer and dispatch-anchor census:
 | `sptm-txm-static-report-v5.json` | `8BB5C33B082DB4CDAECE6F4730A92A2136B0403BF97DB17AF27F5959340ABBA1` |
 | `sptm-txm-static-report-v5.md` | `B74446AD9B4C18C3EB36BC98FB5B0B5BEA0D250F729AD8716159D8ECCEEAD5A5` |
 
+The v6 artifacts add bounded dispatch function, ingress, caller, and guard
+metadata:
+
+| v6 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v6.json` | `78BE444A6C684E4A8511079563EDCAC51A45179876CB9A9B1ACFF303DD49F812` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v6.md` | `728EF3C926A43704CF0C9F0110590A161EADB5348673B38B829A85846D4F60B0` |
+| `sptm-txm-static-report-v6.json` | `175D130EB675592E8CC6EAD719E56A0166D32F52297232E2F0C7E03C30F4283B` |
+| `sptm-txm-static-report-v6.md` | `43F5B9CB13BE7C7431B69EDF82E9603A5B5F48F0E399A8AD45F1A83ED19FF27A` |
+
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
 `kernel.runtime_read_write`. Request generation, transmission, handler
@@ -237,12 +279,12 @@ and full analyzer result are recorded in
 `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`.
 
 The bounded `ADR` resolution, tagged frame-type policy normalization,
-entry-instruction census, direct TXM tail-branch provenance, and SPTM transfer
-and dispatch-anchor census are now implemented. Raw through `-v5` reports
-remain separate. The next justified static step is a symmetric bounded call
-graph around the added 23A355 validator references and their 21B91
-counterparts. Static similarity still cannot establish selector, ABI,
-endpoint, bypass, or runtime-response identity.
+entry-instruction census, direct TXM tail-branch provenance, SPTM transfer and
+dispatch-anchor census, and bounded dispatch guard graph are now implemented.
+Raw through `-v6` reports remain separate. The v6 graph identifies the
+validator counterparts and policy deltas but no residual bypass branch. Static
+similarity still cannot establish selector, ABI, endpoint, bypass, or
+runtime-response identity.
 
 ## Sources
 

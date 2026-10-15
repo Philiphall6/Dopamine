@@ -547,6 +547,20 @@ These locations are suitable for a symmetric bounded call-graph comparison.
 They are not a proven remaining bypass branch, and no device logging at the
 protected boundary has been enabled.
 
+The v6 symmetric guard graph resolves that comparison. The named 23A355
+validators are inlined checks with structural 21B91 counterparts. Both builds
+bound dispatch-table IDs to `0..15`, but the endpoint contract changes from an
+effective `0..31` low-byte range with 8-byte entries on 21B91 to the masked
+criterion `(x0 & 0xfe) < 0x32` with 16-byte entries on 23A355. State/event
+bounds also grow from `17/12` to `23/15`, and the newer GENTER classifier adds
+endpoint-derived events `12`, `13`, and `14`.
+
+The report now records candidate functions, direct callers, direct branch
+ingress, and bounded comparison/conditional-branch guards. This identifies a
+policy migration, not an adaptable residual bypass branch. Runtime protected
+request state remains `NOT_REACHED`, so no new IPA was built for this offline
+analyzer-only phase.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It

@@ -229,5 +229,52 @@ class EntrySequenceTests(unittest.TestCase):
         self.assertEqual(len(descriptor["writes"]), 4)
 
 
+class DispatchMetadataTests(unittest.TestCase):
+    def test_collects_candidates_ingress_and_guards(self):
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(0x3000, 1, "pacibsp", []),
+            instruction(
+                0x3004,
+                analyzer.ARM64_INS_CMP,
+                "cmp",
+                [reg(1), imm(16)],
+                op_str="w1, #0x10",
+            ),
+            instruction(0x3008, 1, "b.hs", [imm(0x3040)], op_str="#0x3040"),
+            instruction(0x300C, 1, "retab", []),
+            instruction(0x3100, 1, "pacibsp", []),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+        image.function_start = lambda address: 0x3000
+        image.calls_to = lambda address: [0x2000]
+        image.branches_to = lambda address: [0x2000, 0x2010]
+        image.window = lambda address, before=6, after=8: [f"window:{address:x}"]
+
+        anchors, functions = analyzer._annotate_dispatch_anchors(
+            image,
+            [
+                {
+                    "address": 0x5000,
+                    "value": "validate_sptm_dispatch_table_id",
+                    "references": [
+                        {"address": 0x3008, "target": 0x5000, "kind": "adr"}
+                    ],
+                }
+            ],
+        )
+
+        self.assertEqual(anchors[0]["function_candidates"], [0x3000])
+        self.assertEqual(functions[0]["direct_calls"], [0x2000])
+        self.assertEqual(functions[0]["direct_branches"], [0x2010])
+        self.assertEqual(
+            [guard["mnemonic"] for guard in functions[0]["guards"]],
+            ["cmp", "b.hs"],
+        )
+        self.assertEqual(functions[0]["guards"][1]["branch_target"], 0x3040)
+
+
 if __name__ == "__main__":
     unittest.main()
