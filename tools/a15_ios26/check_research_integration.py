@@ -254,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_PROC_NAME_DISCOVERY_BUILT" in report,
-        "report does not record the bounded proc-name discovery state",
+        "ACTIVE_TITAN_PROBE_IPC_CENSUS_SOURCE_READY" in report,
+        "report does not record the bounded IPC census state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
@@ -344,6 +344,48 @@ def main() -> int:
     require(
         "int offset = 0x579" not in ipc_port,
         "iOS 26 proc-name lookup still hard-codes the stale p_comm offset",
+    )
+    for marker in (
+        "TITAN_IPC_CENSUS_ENTRY_MAX",
+        "TITAN_IPC_CENSUS_LOG_MAX",
+        "TITAN_IPC_CENSUS_TYPE_LOG_MAX",
+        "TITAN_IOS26_IPC_SPACE_TABLE_OFFSET",
+        "TITAN_IOS26_IPC_ENTRY_SIZE",
+        "TITAN_IOS26_IPC_PORT_KOBJECT_OFFSET",
+        "TITAN_IOS26_IOMACHPORT_OBJECT_OFFSET",
+        "ipc_space_table_exact",
+        "process_census_open_userclients",
+        "titan_read_pointer_exact",
+        "gTitanContext.iomachport_vtable",
+        "wrapper_vtable != gTitanContext.iomachport_vtable",
+        "if (!(state_word & 0x80000000U))",
+        "titan.ipc-census CANDIDATE",
+        "titan.ipc-census TYPE",
+        "titan.ipc-census SUMMARY",
+        "table-stable=%s pid-stable=%s",
+    ):
+        require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
+    census_start = ipc_port.find("static uint64_t process_census_open_userclients")
+    census_end = ipc_port.find("uint64_t process_find_open_userclient", census_start)
+    require(census_start >= 0 and census_end > census_start, "IPC census body is missing")
+    census_body = ipc_port[census_start:census_end]
+    for forbidden in ("kwrite", "task_copy_ipc_entry", "mach_port_", "IOConnectCall"):
+        require(forbidden not in census_body, f"read-only IPC census contains {forbidden}")
+    for marker in (
+        "titan.iorvbar.wrapper-vtable-read",
+        "titan.iorvbar.wrapper-vtable",
+        "gTitanContext.iomachport_vtable = wrapperVtable",
+        "titan.ipc-census STOP read-only; task_copy_ipc_entry not reached",
+    ):
+        require(marker in titan, f"Titan IPC census integration is missing marker: {marker}")
+    setup_start = titan.find("int titan_setup_command_buffers")
+    setup_end = titan.find("int titan_parse_RTKit_information", setup_start)
+    setup_body = titan[setup_start:setup_end]
+    active_stop = setup_body.find("if (gTitanContext.ios26_a15_active_probe)")
+    ipc_copy = setup_body.find("if (task_copy_ipc_entry(")
+    require(
+        active_stop >= 0 and ipc_copy >= 0 and active_stop < ipc_copy,
+        "exact-target IPC census no longer stops before task_copy_ipc_entry",
     )
     for marker in (
         "!titan_gadget(tpidrro_el0)",

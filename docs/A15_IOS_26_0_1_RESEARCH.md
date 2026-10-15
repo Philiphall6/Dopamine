@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_PROC_NAME_DISCOVERY_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_SOURCE_READY`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
@@ -28,9 +28,9 @@ bootstrap.
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
 packaged Titan binary contains all nine exact-read checkpoints for the map and
 descriptor fields plus the bounded `titan.proc-name-offset` and
-`titan.proc-by-name` markers. The `c703565` descriptor-range build passed its
-checks on-device; `a720b8a` packages the newly exposed process-lookup fix and
-awaits its first device run.
+`titan.proc-by-name` markers. The `a720b8a` process-lookup build passed its
+intended lookup checks on-device. The next source revision adds a bounded,
+read-only IPC census; its packaged build evidence is pending.
 
 ## First Active Device Result
 
@@ -138,6 +138,44 @@ closed on invalid pointers, read errors, ambiguity, or exhausted bounds. No
 kernel write, IPC entry copy, command submission, physical write, privilege
 change, or bootstrap operation is added by this discovery step.
 
+## Fifth Active Device Result
+
+The process-name `a720b8a` build was run on the exact target on 2026-10-15.
+ClearSword established the same live kernel primitive, and Titan again passed
+the kernel patchfinder and complete IORVBAR validation. The process-name scan
+found two self-name candidates at `0x56c` and `0x57d`; only `0x57d` resolved
+uniquely to `backboardd`, at proc `0xffffffe08fa67b40`, pid 72, after 330
+processes. Its decoded IPC table was `0xffffffec50f4c000` with 2730 entries.
+The run completed without a panic or reboot.
+
+The first failure is now the legacy open-userclient scan. It did not find the
+expected live object vtable `0xfffffff04bbbba10` (patchfinder base
+`0xfffffff04bbbba00` plus the historical `0x10` vtable-header adjustment).
+That scan assumes the first 32 bits of every port retain the older active bit
+and low-ten-bit `IKOT_IOKIT_CONNECT == 29` encoding. Current XNU instead
+routes `ip_type(port)` through the IPC object representation, while IOKit still
+stores the port kobject as an `IOMachPort` wrapper whose signed `object` field
+contains the userclient. See Apple's current
+[`ipc_port.h`](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/ipc/ipc_port.h)
+and
+[`IOUserClient.cpp`](https://github.com/apple-oss-distributions/xnu/blob/main/iokit/Kernel/IOUserClient.cpp#L2399-L2454).
+
+The next exact-target revision therefore records a read-only census instead of
+trusting the legacy type gate. It captures the already validated live
+`IOMachPort` vtable from the `gfx-asc` service path, scans at most 4096 stable
+IPC entries, validates the observed `0x48/0x18/0x50/0x20` layout contract, and
+follows `IOMachPort.object` only when the intermediate object has that exact
+vtable. All table, port, wrapper, object, and vtable fields use four- or
+eight-byte `clearsword_kreadbuf_exact` reads. Candidate and legacy-type logging
+are each capped at 64 records; the full counters, type histogram, table
+stability, and pid stability remain in a deterministic summary. The
+historical active bit is retained as a safety gate before following a port's
+`kobject`, but type 29 is measured rather than required. The
+exact-target path returns before `task_copy_ipc_entry` even if a matching
+vtable is seen.
+It performs no kernel write, right transfer, command submission, MMIO access,
+physical write, privilege change, or bootstrap operation.
+
 ## End-to-End Chain Status
 
 | Stage | Status | Evidence or blocker |
@@ -150,7 +188,7 @@ change, or bootstrap operation is added by this discovery step.
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
 | Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
-| Titan unrestricted physical write | **NOT REACHED / CLEAN PROCESS LOOKUP STOP** | IORVBAR resolution passed; stale `proc` name lookup stopped command-buffer setup before IPC entry copy or GFX submission |
+| Titan unrestricted physical write | **NOT REACHED / CLEAN IPC LOOKUP STOP** | IORVBAR and `backboardd` lookup passed; the legacy port-type/vtable filter found no userclient before IPC entry copy or GFX submission |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
@@ -238,7 +276,9 @@ inferred from the static captures.
 | Titan iOS 26 guard | exact `iPhone14,2/23A355` gate plus runtime object validation |
 | RTBuddy/segment discovery | `READ_ONLY_PASS` from bounded capture |
 | GFX firmware patchfinder | `STATIC_PASS` on the extracted image |
-| IORVBAR object traversal | `OBJECT_GRAPH_PASS`; corrected descriptor-range validation source ready |
+| IORVBAR object traversal | `ACTIVE_PASS`; exact descriptor and map validation completed on-device |
+| `backboardd` process lookup | `ACTIVE_PASS`; pid 72, unique `proc`, 2730-entry IPC table |
+| Open IOGPU userclient lookup | `ACTIVE_BLOCKED`; bounded exact-read IPC census source ready |
 | GFX physical addresses and translation root | `DEVICE_RESULT_PENDING`; not reached in first run |
 | Controlled mapping window | `DEVICE_RESULT_PENDING` |
 | Titan `physwritebuf` publication | `DEVICE_RESULT_PENDING` |
