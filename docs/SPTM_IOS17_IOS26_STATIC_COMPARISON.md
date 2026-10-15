@@ -239,6 +239,32 @@ table keeps a table-class stride of `0x180` and a descriptor stride of `0x18`
 on both builds. These facts refine the topology comparison but do not identify
 a live selector, protected request, accepted response, or residual bypass.
 
+## IOMMU Registration Topology
+
+The v9 report follows the dynamic iOS 26 wrapper back through its initializer
+and decodes the authenticated chained descriptor pointers. It applies the same
+descriptor-field test to the direct iOS 17 registrations:
+
+| Driver | Registry index | 21B91 registrations | 23A355 registrations |
+| --- | ---: | --- | --- |
+| SART | `1` | ID `5`, mask `0x2` | ID `5`, mask `0x2` |
+| NVMe | `2` | ID `6`, mask `0x2` | ID `6`, mask `0x2` |
+| uat | `3` | ID `7`, mask `0x2` | ID `7`, mask `0x2` |
+| t8110dart | `5` | ID `3`, mask `0x2`; ID `4`, mask `0x8` | ID `3`, mask `0x2`; ID `4`, mask `0x8` |
+
+The contract is therefore semantically continuous for these four drivers.
+21B91 passes each descriptor directly to `0xfffffff00708891c`; its table ID and
+two endpoint fields are at offsets `0x20`, `0x28`, and `0x30`. 23A355 calls
+initializer `0xfffffff0270cb1c8`, resolves an authenticated descriptor pointer
+from registry `0xfffffff027084e10` with `0x20`-byte entries, then calls wrapper
+`0xfffffff0270cc1ac`; the corresponding descriptor offsets are `0x30`, `0x38`,
+and `0x40`.
+
+This closes the v8 dynamic-wrapper ambiguity. The newer build moved ownership
+and added indirection, but it did not change the observed IOMMU table IDs or
+domain masks. This remains static registration metadata, not a request ABI,
+runtime response, or bypass.
+
 ## Result
 
 The high-level division of responsibility is continuous from iOS 17.1.1 to
@@ -320,6 +346,15 @@ dynamic source-register arguments as unresolved:
 | `sptm-txm-static-report-v8.json` | `CB1465EFE7E855E43CACA55231A0F5F7C1A103F6EA1C6946253824704147882D` |
 | `sptm-txm-static-report-v8.md` | `221C2E9D088182A5ED7EFBA23EF2FAB11F68DE7AE748B6B674BCFA0FA08297AE` |
 
+The v9 artifacts add symmetric IOMMU descriptor and registration topology:
+
+| v9 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v9.json` | `54D8968B498A2B4D11793D4D132315DB7910628EDE024D9F87E167D747D5D7A5` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v9.md` | `84E1B8D6E6B71AD8FB33F722703AFDEC2C3E7F9900D12D8A9CF1B725B855F6B6` |
+| `sptm-txm-static-report-v9.json` | `64CD0866F24A691ACBD4ED872E38682BF41019D43433F29AB0E1E3BDF571E64C` |
+| `sptm-txm-static-report-v9.md` | `B839CCB6C06CA198B7550C172CD7620D495E31D5476F1C96C716DFCCB84B0DC1` |
+
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
 `kernel.runtime_read_write`. Request generation, transmission, handler
@@ -371,9 +406,10 @@ The bounded `ADR` resolution, tagged frame-type policy normalization,
 entry-instruction census, direct TXM tail-branch provenance, SPTM transfer and
 dispatch-anchor census, bounded dispatch guard graph, and authenticated
 callback provenance, and registration descriptor recovery are now implemented.
-Raw through `-v8` reports remain separate. The v8 graph confirms continuous
+Raw through `-v9` reports remain separate. The v9 graph confirms continuous
 PAC-protected callback dispatch, identifies the registered values as caller
-domain masks, and finds no residual bypass branch. Static similarity still
+domain masks, and proves equivalent IOMMU registrations across the descriptor
+layout migration. It finds no residual bypass branch. Static similarity still
 cannot establish selector, ABI, endpoint, bypass, or runtime-response identity.
 
 ## Sources

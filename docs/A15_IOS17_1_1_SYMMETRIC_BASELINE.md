@@ -350,6 +350,26 @@ the permission descriptor.
 | `sptm-txm-static-report-v8.json` | `CB1465EFE7E855E43CACA55231A0F5F7C1A103F6EA1C6946253824704147882D` |
 | `sptm-txm-static-report-v8.md` | `221C2E9D088182A5ED7EFBA23EF2FAB11F68DE7AE748B6B674BCFA0FA08297AE` |
 
+## Symmetric analyzer v9 IOMMU topology
+
+The v9 reports resolve the v8 dynamic wrapper to four IOMMU driver
+descriptors. Both builds produce the same registrations: SART `5/0x2`, NVMe
+`6/0x2`, uat `7/0x2`, and t8110dart `3/0x2` plus `4/0x8`.
+
+The representation changes substantially. 21B91 passes descriptors directly,
+with the table ID at `+0x20` and endpoint fields at `+0x28/+0x30`. 23A355 uses
+a `0x20`-byte descriptor registry, an authenticated chained pointer, and a
+separate wrapper; its fields move to `+0x30/+0x38/+0x40`. This is a layout and
+ownership migration, not a change in the observed dispatch permission
+contract.
+
+| v9 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v9.json` | `54D8968B498A2B4D11793D4D132315DB7910628EDE024D9F87E167D747D5D7A5` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v9.md` | `84E1B8D6E6B71AD8FB33F722703AFDEC2C3E7F9900D12D8A9CF1B725B855F6B6` |
+| `sptm-txm-static-report-v9.json` | `64CD0866F24A691ACBD4ED872E38682BF41019D43433F29AB0E1E3BDF571E64C` |
+| `sptm-txm-static-report-v9.md` | `B839CCB6C06CA198B7550C172CD7620D495E31D5476F1C96C716DFCCB84B0DC1` |
+
 ## Created artifacts
 
 All extracted files and generated reports are under:

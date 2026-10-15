@@ -592,6 +592,41 @@ descriptor remains `0x18` bytes on both builds. This narrows the contract
 delta but does not change the live `NOT_REACHED` result, so no active SPTM/TXM
 request or new IPA belongs to this static phase.
 
+The v9 analysis closes the dynamic IOMMU-wrapper branch. SART, NVMe, uat, and
+t8110dart produce the same table IDs and masks on both builds: `5/0x2`,
+`6/0x2`, `7/0x2`, and `3/0x2 + 4/0x8`. iOS 17 carries the fields directly at
+`+0x20/+0x28/+0x30`; iOS 26 introduces a `0x20`-byte registry, authenticated
+descriptor pointers, wrapper `0xfffffff0270cc1ac`, and fields at
+`+0x30/+0x38/+0x40`. The topology changed, but the observed permission contract
+did not.
+
+## pois0nSword Parallel Comparison
+
+`GenericCoding/pois0nSword` was reviewed at commit
+`3caf88be7f46923db6ef62cc69cc7e6597c59928` without executing its JavaScript.
+The repository targets iOS 26.1 build `23B85` and supplies offset profiles only
+for `iPhone14,7` and `iPhone15,5`; it has no `iPhone14,2/23A355` profile.
+
+Its implemented path is a WebContent/JSC chain: CVE-2025-43529 primitives,
+DarkSword-style userland read/write, JSC/WebCore object traversal, a userland
+PAC bypass, and an indirect native-call test. The repository does not provide
+an ANGLE sandbox escape, kernel read/write, a Titan physical-write primitive,
+or an SPTM/TXM bypass. Its offsets and internal JSC/WebCore/dyld layouts cannot
+be transferred from `23B85` to `23A355`.
+
+The reusable part is methodological: build-and-device keyed offset profiles,
+staged primitive validation, bounded retries, and explicit logging between
+chain stages. These patterns can improve diagnostics, but pois0nSword is not a
+replacement for the missing `kernel.runtime_read_write` and
+`selector.ppl_metadata` stages in the current Dopamine trace.
+
+Primary references:
+
+- https://github.com/GenericCoding/pois0nSword/tree/3caf88be7f46923db6ef62cc69cc7e6597c59928
+- https://github.com/GenericCoding/pois0nSword/blob/3caf88be7f46923db6ef62cc69cc7e6597c59928/README.md
+- https://github.com/GenericCoding/pois0nSword/blob/3caf88be7f46923db6ef62cc69cc7e6597c59928/do_chain.js
+- https://github.com/GenericCoding/pois0nSword/tree/3caf88be7f46923db6ef62cc69cc7e6597c59928/offsets
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It

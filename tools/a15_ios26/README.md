@@ -83,6 +83,8 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
   and authenticated transfers in direct or one-hop tail paths
 - bounded `x0`/`x2` registration-argument reconstruction, preserving dynamic
   source registers instead of assigning unsupported immediate values
+- symmetric IOMMU descriptor decoding across direct and chained-registry
+  layouts, including final table IDs and domain permission masks
 
 These results show patchfinder compatibility for the inspected paths. They do
 not provide the unrestricted physical-write primitive required by Dopamine's

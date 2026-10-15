@@ -7,10 +7,15 @@ import capstone
 from capstone.arm64 import (
     ARM64_REG_W0,
     ARM64_REG_W2,
+    ARM64_REG_W9,
+    ARM64_REG_W10,
     ARM64_REG_X0,
     ARM64_REG_X1,
     ARM64_REG_X2,
     ARM64_REG_X3,
+    ARM64_REG_X9,
+    ARM64_REG_X10,
+    ARM64_REG_X16,
 )
 
 import analyze_sptm_txm as analyzer
@@ -396,6 +401,75 @@ class DispatchMetadataTests(unittest.TestCase):
         self.assertIsNone(x2["value"])
         self.assertEqual(x2["source_register"], "x3")
 
+    def test_recovers_static_adr_argument(self):
+        names = {ARM64_REG_X1: "x1"}
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(
+                0x2100,
+                analyzer.ARM64_INS_ADR,
+                "adr",
+                [reg(ARM64_REG_X1), imm(0x9000)],
+                op_str="x1, #0x9000",
+                register_names=names,
+            ),
+            instruction(
+                0x2104,
+                analyzer.ARM64_INS_BL,
+                "bl",
+                [imm(0x3000)],
+                op_str="#0x3000",
+                register_names=names,
+            ),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+
+        argument = analyzer._recover_immediate_argument(image, 0x2104, 1)
+
+        self.assertEqual(argument["value"], 0x9000)
+        self.assertIsNone(argument["source_register"])
+
+    def test_skips_non_writing_branch_when_tracing_argument(self):
+        base = 22
+        names = {ARM64_REG_X2: "x2", base: "x22"}
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(
+                0x2200,
+                analyzer.ARM64_INS_LDR,
+                "ldr",
+                [reg(ARM64_REG_X2), mem(base, 0x38)],
+                op_str="x2, [x22, #0x38]",
+                register_names=names,
+            ),
+            instruction(
+                0x2204,
+                1,
+                "cbz",
+                [reg(ARM64_REG_X2), imm(0x2300)],
+                op_str="x2, #0x2300",
+                register_names=names,
+            ),
+            instruction(
+                0x2208,
+                analyzer.ARM64_INS_BL,
+                "bl",
+                [imm(0x3000)],
+                op_str="#0x3000",
+                register_names=names,
+            ),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+
+        argument = analyzer._recover_immediate_argument(image, 0x2208, 2)
+
+        self.assertEqual(argument["definition"]["address"], 0x2200)
+        self.assertEqual(argument["definition"]["mnemonic"], "ldr")
+
     def test_collects_authenticated_tail_trampoline(self):
         image = analyzer.MachOImage.__new__(analyzer.MachOImage)
         image.instructions = [
@@ -426,6 +500,93 @@ class DispatchMetadataTests(unittest.TestCase):
             ],
             "blraaz",
         )
+
+
+class IommuDescriptorTests(unittest.TestCase):
+    def test_decodes_dispatch_ids_and_permission_masks(self):
+        descriptor = 0x2000
+        imagebase = 0x100000000
+        values = {
+            descriptor: 0x1000000000000120,
+            descriptor + 0x30: 3,
+            descriptor + 0x38: 0x3000000000000300,
+            descriptor + 0x40: 0x3000000000000400,
+        }
+        image = types.SimpleNamespace(
+            imagebase=imagebase,
+            read_u64=lambda address: values.get(address, 0),
+            resolve_chained_pointer=lambda encoded: (
+                imagebase + (encoded & 0xFFFFFFFF) if encoded else None
+            ),
+            read_cstring=lambda address: (
+                "t8110dart" if address == imagebase + 0x120 else None
+            ),
+        )
+
+        result = analyzer._summarize_iommu_descriptor(
+            image, descriptor, (2, 8)
+        )
+
+        self.assertEqual(result["name"], "t8110dart")
+        self.assertEqual(result["table_id_offset"], 0x30)
+        self.assertEqual(
+            [entry["table_id"] for entry in result["registrations"]],
+            [3, 4],
+        )
+        self.assertEqual(
+            [entry["permission_mask"] for entry in result["registrations"]],
+            [2, 8],
+        )
+
+    def test_recovers_permission_masks_from_registration_stores(self):
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(
+                0x3000,
+                analyzer.ARM64_INS_MOV,
+                "mov",
+                [reg(ARM64_REG_W10), imm(2)],
+                op_str="w10, #2",
+                register_names={ARM64_REG_W10: "w10"},
+            ),
+            instruction(
+                0x3004,
+                1,
+                "stp",
+                [reg(ARM64_REG_X16), reg(ARM64_REG_X10), mem(12, 0)],
+                op_str="x16, x10, [x12]",
+                register_names={
+                    ARM64_REG_X16: "x16",
+                    ARM64_REG_X10: "x10",
+                },
+            ),
+            instruction(
+                0x3008,
+                analyzer.ARM64_INS_MOV,
+                "mov",
+                [reg(ARM64_REG_W9), imm(8)],
+                op_str="w9, #8",
+                register_names={ARM64_REG_W9: "w9"},
+            ),
+            instruction(
+                0x300C,
+                1,
+                "stp",
+                [reg(ARM64_REG_X16), reg(ARM64_REG_X9), mem(8, 0)],
+                op_str="x16, x9, [x8]",
+                register_names={
+                    ARM64_REG_X16: "x16",
+                    ARM64_REG_X9: "x9",
+                },
+            ),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+
+        result = analyzer._collect_stored_permission_masks(image, 0x3000)
+
+        self.assertEqual(result, [2, 8])
 
 
 if __name__ == "__main__":

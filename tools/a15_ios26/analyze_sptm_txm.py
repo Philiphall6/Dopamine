@@ -14,6 +14,7 @@ import dataclasses
 import json
 import pathlib
 import re
+import struct
 import sys
 from collections.abc import Iterable, Sequence
 
@@ -107,6 +108,38 @@ class MachOImage:
             if start <= offset < end:
                 return int(section.virtual_address) + offset - start
         return None
+
+    def mapped_bytes(self, address: int, size: int) -> bytes | None:
+        for section in self.binary.sections:
+            start = int(section.virtual_address)
+            content = bytes(section.content)
+            offset = address - start
+            if 0 <= offset and offset + size <= len(content):
+                return content[offset : offset + size]
+        return None
+
+    def read_u64(self, address: int) -> int | None:
+        content = self.mapped_bytes(address, 8)
+        return None if content is None else struct.unpack("<Q", content)[0]
+
+    def read_cstring(self, address: int, limit: int = 256) -> str | None:
+        for section in self.binary.sections:
+            start = int(section.virtual_address)
+            content = bytes(section.content)
+            offset = address - start
+            if not 0 <= offset < len(content):
+                continue
+            raw = content[offset : offset + limit].split(b"\0", 1)[0]
+            if not raw:
+                return None
+            return raw.decode("utf-8", errors="replace")
+        return None
+
+    def resolve_chained_pointer(self, encoded: int | None) -> int | None:
+        if not encoded:
+            return None
+        target = self.imagebase + (encoded & 0xFFFFFFFF)
+        return target if self.mapped_bytes(target, 1) is not None else None
 
     def find_string(self, value: str) -> list[int]:
         needle = value.encode("utf-8") + b"\0"
@@ -805,13 +838,52 @@ def _bounded_function_instructions(
     return result
 
 
-def _register_index(instruction, operand) -> int | None:
-    if operand.type != capstone.CS_OP_REG:
-        return None
-    name = instruction.reg_name(operand.reg)
+def _named_register_index(instruction, register: int) -> int | None:
+    name = instruction.reg_name(register)
     if len(name) < 2 or name[0] not in {"w", "x"} or not name[1:].isdigit():
         return None
     return int(name[1:])
+
+
+def _register_index(instruction, operand) -> int | None:
+    if operand.type != capstone.CS_OP_REG:
+        return None
+    return _named_register_index(instruction, operand.reg)
+
+
+def _instruction_writes_register_index(instruction, register_index: int) -> bool:
+    if hasattr(instruction, "regs_access"):
+        try:
+            _, written = instruction.regs_access()
+        except capstone.CsError:
+            written = []
+        if any(
+            _named_register_index(instruction, register) == register_index
+            for register in written
+        ):
+            return True
+
+    if not instruction.operands:
+        return False
+    mnemonic = instruction.mnemonic
+    if (
+        mnemonic
+        in {
+            "cmp",
+            "cmn",
+            "tst",
+            "ccmp",
+            "ccmn",
+            "cbz",
+            "cbnz",
+            "tbz",
+            "tbnz",
+        }
+        or mnemonic.startswith("b.")
+        or mnemonic.startswith(("str", "stp"))
+    ):
+        return False
+    return _register_index(instruction, instruction.operands[0]) == register_index
 
 
 def _recover_immediate_argument(
@@ -828,7 +900,7 @@ def _recover_immediate_argument(
             break
         if not instruction.operands:
             continue
-        if _register_index(instruction, instruction.operands[0]) != register_index:
+        if not _instruction_writes_register_index(instruction, register_index):
             continue
 
         definition = {
@@ -853,6 +925,17 @@ def _recover_immediate_argument(
                 "source_register": None,
             }
 
+        if (
+            instruction.id == ARM64_INS_ADR
+            and len(instruction.operands) >= 2
+            and instruction.operands[1].type == capstone.CS_OP_IMM
+        ):
+            return {
+                "value": image._imm(instruction.operands[1]),
+                "definition": definition,
+                "source_register": None,
+            }
+
         source_register = None
         if (
             instruction.mnemonic == "mov"
@@ -867,6 +950,311 @@ def _recover_immediate_argument(
         }
 
     return {"value": None, "definition": None, "source_register": None}
+
+
+def _recover_call_arguments(
+    image: MachOImage, call_address: int, register_indices: Sequence[int]
+) -> dict:
+    return {
+        f"x{register_index}": _recover_immediate_argument(
+            image, call_address, register_index
+        )
+        for register_index in register_indices
+    }
+
+
+def _collect_direct_callers(
+    image: MachOImage, function: int, register_indices: Sequence[int]
+) -> list[dict]:
+    return [
+        {
+            "address": address,
+            "function_candidate": image.function_start(address),
+            "arguments": _recover_call_arguments(
+                image, address, register_indices
+            ),
+            "window": image.window(address, before=12, after=4),
+        }
+        for address in image.calls_to(function)
+    ]
+
+
+def _collect_stored_permission_masks(
+    image: MachOImage, function: int
+) -> list[int]:
+    instructions = _bounded_function_instructions(image, function)
+    masks = []
+    for position, instruction in enumerate(instructions):
+        if (
+            instruction.mnemonic not in {"mov", "movz"}
+            or len(instruction.operands) < 2
+            or instruction.operands[0].type != capstone.CS_OP_REG
+            or instruction.operands[1].type != capstone.CS_OP_IMM
+        ):
+            continue
+        destination = _register_index(instruction, instruction.operands[0])
+        if destination is None:
+            continue
+        value = image._imm(instruction.operands[1])
+        if value == 0 or value & (value - 1):
+            continue
+        for store in instructions[position + 1 : position + 4]:
+            if (
+                store.mnemonic == "stp"
+                and len(store.operands) >= 2
+                and store.operands[1].type == capstone.CS_OP_REG
+                and _register_index(store, store.operands[1]) == destination
+            ):
+                if value not in masks:
+                    masks.append(value)
+                break
+    return masks
+
+
+def _find_indexed_descriptor_table(
+    image: MachOImage, function: int
+) -> dict | None:
+    instructions = _bounded_function_instructions(image, function, 96)
+    instruction_addresses = {instruction.address for instruction in instructions}
+    references = {
+        reference.address: reference.target
+        for reference in image._references
+        if reference.address in instruction_addresses
+    }
+    for position, instruction in enumerate(instructions):
+        target = references.get(instruction.address)
+        if target is None or not instruction.operands:
+            continue
+        destination = instruction.operands[0]
+        if destination.type != capstone.CS_OP_REG:
+            continue
+        base_register = destination.reg
+        for indexed in instructions[position + 1 : position + 5]:
+            if (
+                indexed.mnemonic != "add"
+                or len(indexed.operands) < 3
+                or indexed.operands[1].type != capstone.CS_OP_REG
+                or indexed.operands[1].reg != base_register
+                or indexed.operands[2].type != capstone.CS_OP_REG
+                or indexed.operands[2].shift.value <= 0
+            ):
+                continue
+            entry_register = indexed.operands[0].reg
+            stride = 1 << indexed.operands[2].shift.value
+            for load in instructions[position + 2 : position + 8]:
+                memory_operands = [
+                    operand
+                    for operand in load.operands
+                    if operand.type == capstone.CS_OP_MEM
+                ]
+                if not memory_operands:
+                    continue
+                memory = memory_operands[-1].mem
+                if memory.base == entry_register and memory.disp >= 0:
+                    return {
+                        "base": target,
+                        "stride": stride,
+                        "descriptor_pointer_offset": int(memory.disp),
+                        "reference": instruction.address,
+                        "indexed_add": indexed.address,
+                        "descriptor_load": load.address,
+                    }
+    return None
+
+
+def _summarize_iommu_descriptor(
+    image: MachOImage, address: int, permission_masks: Sequence[int]
+) -> dict | None:
+    values = [image.read_u64(address + offset) for offset in range(0, 0x60, 8)]
+    if not values or values[0] is None:
+        return None
+    name_address = image.resolve_chained_pointer(values[0])
+    name = image.read_cstring(name_address) if name_address is not None else None
+    if not name:
+        return None
+
+    table_id_offset = None
+    table_id = None
+    for offset in range(8, 0x50, 8):
+        value = values[offset // 8]
+        endpoint = values[(offset + 8) // 8]
+        if (
+            value is not None
+            and 0 < value < 16
+            and endpoint is not None
+            and endpoint >> 32 != 0
+            and image.resolve_chained_pointer(endpoint) is not None
+        ):
+            table_id_offset = offset
+            table_id = value
+            break
+    if table_id_offset is None or table_id is None:
+        return None
+
+    first_raw = image.read_u64(address + table_id_offset + 8)
+    second_raw = image.read_u64(address + table_id_offset + 16)
+    first_endpoint = image.resolve_chained_pointer(first_raw)
+    second_endpoint = image.resolve_chained_pointer(second_raw)
+    registrations = []
+    if first_endpoint is not None and permission_masks:
+        registrations.append(
+            {
+                "table_id": table_id,
+                "permission_mask": permission_masks[0],
+                "endpoint_table": first_endpoint,
+            }
+        )
+    if second_endpoint is not None and len(permission_masks) >= 2:
+        registrations.append(
+            {
+                "table_id": table_id + 1,
+                "permission_mask": permission_masks[1],
+                "endpoint_table": second_endpoint,
+            }
+        )
+    return {
+        "address": address,
+        "name": name,
+        "name_address": name_address,
+        "table_id_offset": table_id_offset,
+        "table_id": table_id,
+        "first_endpoint_offset": table_id_offset + 8,
+        "second_endpoint_offset": table_id_offset + 16,
+        "registrations": registrations,
+    }
+
+
+def _collect_iommu_registration_topology(image: MachOImage) -> dict:
+    wrapper_anchors = image.referenced_strings(
+        r"^register_sptm_iommu_dispatch_table$"
+    )
+    wrapper_functions = sorted(
+        {
+            function
+            for anchor in wrapper_anchors
+            for reference in anchor["references"]
+            if (
+                function := image.function_start(reference["address"])
+            )
+            is not None
+        }
+    )
+
+    if wrapper_functions:
+        wrapper = wrapper_functions[0]
+        wrapper_calls = _collect_direct_callers(image, wrapper, (0, 1, 2, 3))
+        permission_masks = [
+            call["arguments"]["x3"]["value"]
+            for call in wrapper_calls
+            if call["arguments"]["x3"]["value"] is not None
+        ]
+        initializer_functions = sorted(
+            {
+                entry["function_candidate"]
+                for entry in wrapper_calls
+                if entry["function_candidate"] is not None
+            }
+        )
+        initializer = initializer_functions[0] if initializer_functions else None
+        initializer_calls = (
+            _collect_direct_callers(image, initializer, (0,))
+            if initializer is not None
+            else []
+        )
+        table = (
+            _find_indexed_descriptor_table(image, initializer)
+            if initializer is not None
+            else None
+        )
+        descriptors = []
+        if table is not None:
+            for call in initializer_calls:
+                index = call["arguments"]["x0"].get("value")
+                if index is None:
+                    continue
+                encoded = image.read_u64(
+                    table["base"]
+                    + index * table["stride"]
+                    + table["descriptor_pointer_offset"]
+                )
+                descriptor_address = image.resolve_chained_pointer(encoded)
+                if descriptor_address is None:
+                    continue
+                descriptor = _summarize_iommu_descriptor(
+                    image, descriptor_address, permission_masks
+                )
+                if descriptor is not None:
+                    descriptors.append(
+                        {
+                            "initializer_call": call["address"],
+                            "registry_index": index,
+                            **descriptor,
+                        }
+                    )
+        return {
+            "kind": "wrapped_registry",
+            "wrapper_function": wrapper,
+            "wrapper_calls": wrapper_calls,
+            "initializer_function": initializer,
+            "initializer_calls": initializer_calls,
+            "descriptor_registry": table,
+            "descriptors": descriptors,
+        }
+
+    registrar_anchors = image.referenced_strings(
+        r"^sptm_register_dispatch_table$"
+    )
+    registrar_functions = sorted(
+        {
+            function
+            for anchor in registrar_anchors
+            for reference in anchor["references"]
+            if (
+                function := image.function_start(reference["address"])
+            )
+            is not None
+        }
+    )
+    for registrar in registrar_functions:
+        calls = _collect_direct_callers(image, registrar, (0, 1))
+        permission_masks = _collect_stored_permission_masks(image, registrar)
+        descriptors = []
+        for call in calls:
+            descriptor_address = call["arguments"]["x1"].get("value")
+            index = call["arguments"]["x0"].get("value")
+            if descriptor_address is None or index is None:
+                continue
+            descriptor = _summarize_iommu_descriptor(
+                image, descriptor_address, permission_masks
+            )
+            if descriptor is not None:
+                descriptors.append(
+                    {
+                        "initializer_call": call["address"],
+                        "registry_index": index,
+                        **descriptor,
+                    }
+                )
+        if descriptors:
+            return {
+                "kind": "direct_descriptor",
+                "wrapper_function": None,
+                "wrapper_calls": [],
+                "initializer_function": registrar,
+                "initializer_calls": calls,
+                "descriptor_registry": None,
+                "descriptors": descriptors,
+            }
+
+    return {
+        "kind": "unresolved",
+        "wrapper_function": None,
+        "wrapper_calls": [],
+        "initializer_function": None,
+        "initializer_calls": [],
+        "descriptor_registry": None,
+        "descriptors": [],
+    }
 
 
 def _collect_nearby_calls(
@@ -1114,6 +1502,9 @@ def analyze_sptm(image: MachOImage) -> dict:
         },
         "dispatch_anchors": dispatch_anchors,
         "dispatch_functions": dispatch_functions,
+        "iommu_registration_topology": _collect_iommu_registration_topology(
+            image
+        ),
         "anchors": {},
         "papt_compressed_tables": {},
         "related_referenced_strings": image.referenced_strings(
@@ -1874,6 +2265,41 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
                 f"`{guard['mnemonic']} {guard['operands']}`{target}"
             )
         _append_window(lines, entry["entry_window"])
+
+    topology = sptm.get("iommu_registration_topology", {})
+    lines.extend(("", "### IOMMU dispatch registration topology", ""))
+    lines.append(f"- Registration form: `{topology.get('kind', 'unresolved')}`")
+    if topology.get("wrapper_function") is not None:
+        lines.append(
+            "- IOMMU wrapper: `"
+            + _format_address(topology["wrapper_function"])
+            + "`"
+        )
+    if topology.get("initializer_function") is not None:
+        lines.append(
+            "- IOMMU initializer: `"
+            + _format_address(topology["initializer_function"])
+            + "`"
+        )
+    registry = topology.get("descriptor_registry")
+    if registry:
+        lines.append(
+            f"- Descriptor registry: `{_format_address(registry['base'])}`, "
+            f"stride `0x{registry['stride']:x}`, pointer offset "
+            f"`0x{registry['descriptor_pointer_offset']:x}`"
+        )
+    for descriptor in topology.get("descriptors", []):
+        registrations = ", ".join(
+            f"ID `0x{registration['table_id']:x}` / mask "
+            f"`0x{registration['permission_mask']:x}`"
+            for registration in descriptor["registrations"]
+        )
+        lines.append(
+            f"- `{descriptor['name']}` descriptor "
+            f"`{_format_address(descriptor['address'])}`, registry index "
+            f"`{descriptor['registry_index']}`: "
+            + (registrations or "no mapped endpoint table")
+        )
 
     for anchor, entries in sptm["anchors"].items():
         if not entries:
