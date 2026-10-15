@@ -381,6 +381,86 @@ def _nearby_x16_writes(
     return writes
 
 
+def _reconstruct_x16_constant_before(
+    image: MachOImage, address: int, limit: int = 12
+) -> dict | None:
+    index = image._instruction_index.get(address)
+    if index is None:
+        return None
+    value = 0
+    known_mask = 0
+    writes = []
+    for candidate in reversed(
+        image.instructions[max(0, index - limit) : index]
+    ):
+        if candidate.id == 0 or not candidate.operands:
+            continue
+        destination = candidate.operands[0]
+        if destination.type != capstone.CS_OP_REG:
+            continue
+        destination_name = candidate.reg_name(destination.reg)
+        if destination_name not in {"x16", "w16"}:
+            continue
+        operands = candidate.operands
+        if (
+            candidate.mnemonic == "movk"
+            and len(operands) >= 2
+            and operands[1].type == capstone.CS_OP_IMM
+        ):
+            shift = int(operands[1].shift.value)
+            field_mask = (0xFFFF << shift) & UINT64_MASK
+            if not known_mask & field_mask:
+                value |= (int(operands[1].imm) << shift) & field_mask
+            known_mask |= field_mask
+        elif (
+            candidate.mnemonic == "mov"
+            and len(operands) >= 2
+            and operands[1].type == capstone.CS_OP_IMM
+        ):
+            base = int(operands[1].imm) & UINT64_MASK
+            if destination_name == "w16":
+                base &= 0xFFFFFFFF
+            value = (value & known_mask) | (base & ~known_mask)
+            known_mask = UINT64_MASK
+        else:
+            return None
+        writes.append(
+            {
+                "address": candidate.address,
+                "mnemonic": candidate.mnemonic,
+                "operands": candidate.op_str,
+            }
+        )
+        if known_mask == UINT64_MASK:
+            return {"value": value, "writes": list(reversed(writes))}
+    return None
+
+
+def _collect_tail_branch_descriptors(
+    image: MachOImage, target: int
+) -> list[dict]:
+    entries = []
+    for source in image.branches_to(target):
+        branch = image.instruction_at(source)
+        if branch is None or branch.mnemonic != "b":
+            continue
+        descriptor = _reconstruct_x16_constant_before(image, source)
+        entries.append(
+            {
+                "branch": source,
+                "function_candidate": image.function_start(source),
+                "x16_constant": (
+                    descriptor["value"] if descriptor is not None else None
+                ),
+                "x16_writes": (
+                    descriptor["writes"] if descriptor is not None else []
+                ),
+                "window": image.window(source, before=5, after=1),
+            }
+        )
+    return entries
+
+
 def _collect_svc_zero_entries(image: MachOImage) -> list[dict]:
     entries = []
     for instruction in image.instructions:
@@ -393,14 +473,18 @@ def _collect_svc_zero_entries(image: MachOImage) -> list[dict]:
         ]
         if not immediate_operands or int(immediate_operands[0].imm) != 0:
             continue
+        function_candidate = image.function_start(instruction.address)
         entries.append(
             {
                 "address": instruction.address,
                 "immediate": 0,
                 "opcode": bytes(instruction.bytes).hex(),
-                "function_candidate": image.function_start(instruction.address),
+                "function_candidate": function_candidate,
                 "nearby_x16_writes": _nearby_x16_writes(
                     image, instruction.address
+                ),
+                "tail_branch_descriptors": _collect_tail_branch_descriptors(
+                    image, function_candidate or instruction.address
                 ),
                 "window": image.window(instruction.address, before=8, after=12),
             }
@@ -1115,6 +1199,21 @@ def _append_entry_sequences(
             _append_window(lines, entry.get("window", []))
 
 
+def _append_tail_branch_descriptors(lines: list[str], entries: Sequence[dict]) -> None:
+    resolved = [
+        entry for entry in entries if entry.get("x16_constant") is not None
+    ]
+    lines.append(
+        f"- Tail branches to the thunk: {len(entries)}; "
+        f"complete `x16` constants: {len(resolved)}"
+    )
+    for entry in resolved:
+        lines.append(
+            f"- `{_format_address(entry['branch'])}` -> raw `x16` "
+            f"`0x{entry['x16_constant']:016x}`"
+        )
+
+
 def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
     txm_static_ok = bool(
         txm["device_tree_trust_cache_range"].get("function")
@@ -1176,6 +1275,10 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
 
     lines.extend(("", "### SPTM entry instructions", ""))
     _append_entry_sequences(lines, txm["sptm_entry_sequences"], True)
+    for entry in txm["sptm_entry_sequences"].get("entries", []):
+        _append_tail_branch_descriptors(
+            lines, entry.get("tail_branch_descriptors", [])
+        )
 
     for anchor, entries in txm["anchors"].items():
         if not entries:

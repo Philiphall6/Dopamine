@@ -90,6 +90,30 @@ immediate stubs add `BTI` landing pads and extend the visible immediate set to
 analysis does not name an endpoint, map an SPTM dispatch table, issue a call,
 or observe a return value.
 
+## TXM Tail-Branch Descriptor Symmetry
+
+The v4 analyzer walks backward at most twelve instructions from each direct
+tail branch to a TXM `SVC #0` thunk. It reports an `x16` value only when the
+walk defines all 64 bits through immediate `mov`/`movk` writes. Both builds
+resolve the same seven raw descriptors:
+
+| Raw `x16` descriptor | 21B91 direct tail branch | 23A355 direct tail branch |
+| --- | --- | --- |
+| `0x0000000100000001` | yes | yes |
+| `0x0000000100000002` | yes | yes |
+| `0x0000000100000003` | yes | yes |
+| `0x0000000100000004` | yes | yes |
+| `0x000000fd00000000` | yes | yes |
+| `0x000000fe00000000` | yes | yes |
+| `0x000000ff00000000` | yes | yes |
+
+The sole 21B91 `SVC #0` thunk and the first 23A355 thunk each receive seven
+direct tail branches with complete constants. The second 23A355 thunk has no
+direct branch cross-reference in the decoded executable sections. That does
+not prove it is unreachable: an indirect reference or a runtime-computed
+target remains possible. No semantic endpoint names are assigned to these raw
+values.
+
 ## Result
 
 The high-level division of responsibility is continuous from iOS 17.1.1 to
@@ -121,6 +145,16 @@ instruction windows. Their hashes are:
 | `ios17_1_1-symmetric/sptm-txm-static-report-v3.md` | `12E0077BCA191F920EA1A9DD704F9FED876140F29BE5C379307ACE011F65452D` |
 | `sptm-txm-static-report-v3.json` | `8AE272D5F03990721D29180724BB59B4264056A445EDB0BCFBE4C9DDE7DAE5DA` |
 | `sptm-txm-static-report-v3.md` | `F65226F1F2F3A715F3ED74280D914F39FD564201FB9B00DE6CDC152468D90FC6` |
+
+The v4 artifacts add bounded direct-tail-branch provenance and complete raw
+`x16` descriptor reconstruction:
+
+| v4 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v4.json` | `7A27B4FA55331664129D5AFCBA49FDBE98C639D6B4E2CA48927A849F5274A2D5` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v4.md` | `023C589FA9C1F59D8B8B8B2504946E212B10C8AEDBCB66EB937A0F7462027944` |
+| `sptm-txm-static-report-v4.json` | `99329CFB9419C273C6F541325CF1DEC0BE69955CE93E3232B621B3823237C770` |
+| `sptm-txm-static-report-v4.md` | `D798C5EF67CC22FA19F0140F9F93A3D85DDB0E07391EC8514FDB4A66E62B3993` |
 
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
@@ -169,12 +203,13 @@ provenance, BuildManifest identities, hashes, reproducible Windows commands,
 and full analyzer result are recorded in
 `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`.
 
-The bounded `ADR` resolution, tagged frame-type policy normalization, and
-entry-instruction census are now implemented. Raw, `-v2`, and `-v3` reports
-remain separate. The next justified static step is to trace each observed
-`x16` construction back to its call-site provenance and locate dispatch-table
-cross-references with the same rules on both builds. Static similarity still
-cannot establish selector, ABI, endpoint, or runtime-response identity.
+The bounded `ADR` resolution, tagged frame-type policy normalization,
+entry-instruction census, and direct TXM tail-branch provenance are now
+implemented. Raw, `-v2`, `-v3`, and `-v4` reports remain separate. The next
+justified static step is to locate SPTM-side consumption and dispatch-table
+cross-references for the raw `x16` descriptor fields with the same rules on
+both builds. Static similarity still cannot establish selector, ABI, endpoint,
+or runtime-response identity.
 
 ## Sources
 

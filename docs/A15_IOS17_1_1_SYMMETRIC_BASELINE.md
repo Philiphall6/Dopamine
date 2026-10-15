@@ -240,6 +240,27 @@ identity. No protected instruction was executed.
 | `sptm-txm-static-report-v3.json` | `8AE272D5F03990721D29180724BB59B4264056A445EDB0BCFBE4C9DDE7DAE5DA` |
 | `sptm-txm-static-report-v3.md` | `F65226F1F2F3A715F3ED74280D914F39FD564201FB9B00DE6CDC152468D90FC6` |
 
+## Symmetric analyzer v4 TXM wrapper provenance
+
+The v4 reports add bounded predecessor analysis for direct tail branches to
+TXM `SVC #0`. Both builds resolve the same seven complete raw `x16` constants:
+`0x0000000100000001`, `0x0000000100000002`,
+`0x0000000100000003`, `0x0000000100000004`,
+`0x000000fd00000000`, `0x000000fe00000000`, and
+`0x000000ff00000000`. The first 23A355 thunk has the same seven direct
+predecessors as 21B91; its second thunk has no direct branch cross-reference in
+the decoded text.
+
+The values remain uninterpreted descriptors. The analyzer does not claim that
+the second thunk is unreachable, map an SPTM handler, or execute a request.
+
+| v4 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v4.json` | `7A27B4FA55331664129D5AFCBA49FDBE98C639D6B4E2CA48927A849F5274A2D5` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v4.md` | `023C589FA9C1F59D8B8B8B2504946E212B10C8AEDBCB66EB937A0F7462027944` |
+| `sptm-txm-static-report-v4.json` | `99329CFB9419C273C6F541325CF1DEC0BE69955CE93E3232B621B3823237C770` |
+| `sptm-txm-static-report-v4.md` | `D798C5EF67CC22FA19F0140F9F93A3D85DDB0E07391EC8514FDB4A66E62B3993` |
+
 ## Created artifacts
 
 All extracted files and generated reports are under:

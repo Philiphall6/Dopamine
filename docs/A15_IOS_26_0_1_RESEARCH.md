@@ -530,6 +530,14 @@ but no endpoint or dispatch-table identity is inferred. This remains offline
 evidence: no privileged instruction was executed and the protected-component
 boundary remains `NOT_REACHED`.
 
+The v4 reports trace direct TXM tail branches and reconstruct `x16` only when
+all 64 bits are defined by a bounded immediate-write sequence. Both builds
+produce the same seven raw descriptor constants. The first 23A355 `SVC #0`
+thunk has the same seven direct predecessors as 21B91; the added second thunk
+has no direct branch cross-reference in decoded text. Indirect reachability is
+not excluded, and the values are not promoted to endpoint or permission
+identities.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It

@@ -28,9 +28,15 @@ def mem(base: int, displacement: int):
 
 
 def instruction(
-    address, instruction_id, mnemonic, operands, raw=b"\0\0\0\0", op_str=""
+    address,
+    instruction_id,
+    mnemonic,
+    operands,
+    raw=b"\0\0\0\0",
+    op_str="",
+    register_names=None,
 ):
-    return types.SimpleNamespace(
+    result = types.SimpleNamespace(
         address=address,
         id=instruction_id,
         mnemonic=mnemonic,
@@ -38,6 +44,8 @@ def instruction(
         bytes=raw,
         op_str=op_str,
     )
+    result.reg_name = lambda register: (register_names or {}).get(register, "")
+    return result
 
 
 class ResolverTests(unittest.TestCase):
@@ -154,6 +162,7 @@ class EntrySequenceTests(unittest.TestCase):
             item.address: i for i, item in enumerate(image.instructions)
         }
         image.function_start = lambda address: 0x3000
+        image.branches_to = lambda address: []
         image.window = lambda address, before, after: [f"window:{address:x}"]
 
         entries = analyzer._collect_svc_zero_entries(image)
@@ -161,6 +170,54 @@ class EntrySequenceTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["address"], 0x3000)
         self.assertEqual(entries[0]["opcode"], "010000d4")
+
+    def test_reconstructs_complete_x16_movk_constant(self):
+        x16 = 16
+        names = {x16: "x16"}
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(
+                0x4000,
+                1,
+                "movk",
+                [reg(x16), imm(0, 48)],
+                op_str="x16, #0, lsl #48",
+                register_names=names,
+            ),
+            instruction(
+                0x4004,
+                1,
+                "movk",
+                [reg(x16), imm(1, 32)],
+                op_str="x16, #1, lsl #32",
+                register_names=names,
+            ),
+            instruction(
+                0x4008,
+                1,
+                "movk",
+                [reg(x16), imm(0, 16)],
+                op_str="x16, #0, lsl #16",
+                register_names=names,
+            ),
+            instruction(
+                0x400C,
+                1,
+                "movk",
+                [reg(x16), imm(3)],
+                op_str="x16, #3",
+                register_names=names,
+            ),
+            instruction(0x4010, analyzer.ARM64_INS_B, "b", [imm(0x5000)]),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+
+        descriptor = analyzer._reconstruct_x16_constant_before(image, 0x4010)
+
+        self.assertEqual(descriptor["value"], 0x0000000100000003)
+        self.assertEqual(len(descriptor["writes"]), 4)
 
 
 if __name__ == "__main__":
