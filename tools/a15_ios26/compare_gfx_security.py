@@ -217,10 +217,10 @@ def render_markdown(report: dict) -> str:
             "modifier, key domain, output, and accepted destination are controllable. "
             "Likewise, an MMU mapping routine is not a bypass unless its caller and "
             "authorization boundary are independently established.",
-            "The UPPL handler table is runtime-populated in 23A355. A zeroed "
-            "packaged table prevents static assignment of an index to `map`, "
-            "`unmap`, or `update_mapping`; this is recorded as an unresolved "
-            "runtime authorization boundary, not filled in by inference.",
+            "The UPPL handler table is a zero default in 23A355. Its producer "
+            "remains unresolved, so the packaged value is not evidence that runtime "
+            "population occurs or that an index maps to `map`, `unmap`, or "
+            "`update_mapping`.",
             "",
         ]
     )

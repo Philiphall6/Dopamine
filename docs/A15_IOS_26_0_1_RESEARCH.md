@@ -17,9 +17,9 @@ bootstrap.
 
 The durable offline-analysis handoff is
 `docs/A15_IOS26_WORKLOG.md`. The latest static pass resolves GFX's new UPPL
-consumer separately from SPTM's registered UAT endpoint table and records the
-symmetrical 21B91/23A355 endpoint expansion without claiming a bridge between
-the two tables.
+consumer separately from SPTM's registered UAT endpoint table, proves the
+cross-version SPTM/GFX shared handoff, and isolates iOS 26's new dynamic GFX
+segment registration plus the downstream protected frame-type policy.
 
 ## Latest Build Evidence
 
@@ -331,13 +331,36 @@ be measured symmetrically.
 
 The latest offline pass reconstructs the new 23A355 GXF/UPPL split, its
 indexed four-argument `BRAAZ` dispatch contract, and the zeroed packaged
-dispatch state that must be populated at runtime. It also records the new
-`0x8000 -> 0x419` attribute class and the `+0x638` / `x2[0]` context-switch
-guard. The resulting authorization question is now specific: identify the
-runtime UPPL table producer and the page-ownership policy it applies before a
-mapping handler is published or invoked. See
+dispatch state. A producer-side follow-up now shows that this object is a weak
+zero definition with no local writer, relocation, chained fixup, or PatchBay
+descriptor; runtime population must not be assumed. It also proves that the
+PPL-shared PatchBay base feeds the same 65-record handoff layout used on iOS
+17. The iOS 26-specific addition is dynamic `gfx-data-base`/`gfx-data-size`
+registration into protected frame metadata. Downstream,
+`sptm_uat_map_continue` requires page-table frame type `0x17`, while
+`iommu_register_mapping` passes wildcard selector `0x42`, reads the actual
+frame type, and consults that type's domain bitmap and maximum mapping class.
+The reverse pass reaches endpoint 4 at `0xfffffff0270a1d58`, which acquires a
+type-`0xb` segment-descriptor frame before calling map continuation, and then
+reconnects structurally to the shared GFX handoff. Selector `1` is now mapped
+to accepted existing protected region type `2`; registration validates this
+classification rather than creating a type `0x42`. The next authorization
+check shows that type `2` itself has a zero domain bitmap and maximum mapping
+class `0`, so the registered `gfx-data` region is not a direct UAT leaf target.
+The remaining questions at that stage were whether any direct GXF-to-SPTM edge
+existed and which frame types actually permit mapping, not assumed UPPL table
+publication. See
 [A15 / iOS 26.0.1 Research Worklog](A15_IOS26_WORKLOG.md) for the durable
 checkpoint and exact next task.
+
+The reverse GXF pass subsequently identifies the immediate firmware packet
+constructor at `0xffffff80000339f8`: it emits command `0x10`, submits through
+the GXF wrapper, and reaches `__rtk_mmu_map`. No branch, ID-7 endpoint value,
+packet translation, or shared packet format connects that route directly to
+SPTM endpoints 4/5. They are therefore treated as separate interfaces in the
+same UAT/handoff architecture. The unresolved edge is between the kernel AGX
+message path and the unsymbolized firmware constructor, not between the GXF
+packet and the SPTM endpoint table.
 
 ## Diagnostic Response Logging
 

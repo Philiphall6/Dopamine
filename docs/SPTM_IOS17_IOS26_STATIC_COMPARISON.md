@@ -433,8 +433,34 @@ table grows on 23A355:
 For UAT, 23A355 explicitly adds or separates destroy-state, unmap-table,
 continuation, and remove-context operations. The new endpoint lifecycle is a
 confirmed protected-side expansion, not proof of weaker authorization. The
-UAT table remains distinct from GFX's runtime-populated UPPL client table until
-a direct producer or relocation link is recovered.
+UAT table remains distinct from GFX's zero-default UPPL client table until a
+direct producer link is recovered. The exact GFX slices contain no local
+writer, relocation, chained fixup, or named PatchBay descriptor for that
+object.
+
+The shared SPTM/GFX handoff is now symmetrical and directly linked on
+`23A355`: both builds use the same magic and a 65-record layout with stride
+`0x18`, while GFX consumes PatchBay's PPL-shared base and writes the peer side
+of the handshake. The material iOS 26 delta is instead the dynamic GFX data
+segment record at driver-state `+0xb8` and its selector-1 protected-frame
+registration. Selector `1` accepts existing protected region type `2`; it is
+a compatibility check, not the `0x42` wildcard used later. The downstream UAT
+map path then independently requires frame
+type `0x17` for page tables. Mapping registration passes wildcard selector
+`0x42`, reads the actual frame type, and consults the corresponding domain
+bitmap and maximum mapping class. This is a confirmed policy boundary, not
+evidence that registration bypasses it.
+
+The type-`2` row has a zero domain bitmap and maximum mapping class `0`, so the
+selector-1 `gfx-data` region is not itself accepted as a direct UAT leaf
+target. Nonzero mapping policy is limited to frame types `0`, `0xb`, `0xe`,
+`0xf`, `0x10`, `0x19`, `0x22`, `0x23`, `0x24`, `0x25`, and `0x3b`.
+
+The GFX firmware's command-`0x10` constructor is independently recovered at
+`0xffffff80000339f8`, leading through the direct GXF dispatcher to
+`__rtk_mmu_map`. No direct call, UAT ID-7 value, packet translation, or common
+packet layout links that command to SPTM endpoints 4/5. The two routes share
+UAT/handoff architecture but remain distinct interfaces in the static graph.
 
 | v10 artifact | SHA-256 |
 |---|---|

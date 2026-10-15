@@ -413,18 +413,40 @@ the entry selector retains that route and bit 1 selects
 `__rtk_uppl_client_dispatcher`. The UPPL packet contains a 32-bit index and four
 64-bit arguments, checks both bounds and a null handler, then transfers through
 `BRAAZ`. Its packaged count and table pointer are both zero, proving that the
-handler table is runtime-populated and preventing a static assignment of
-indices to `map`, `unmap`, or `update_mapping`.
+packaged image does not publish handlers and preventing a static assignment of
+indices to `map`, `unmap`, or `update_mapping`. The object is a weak definition
+with no local writer, relocation, chained fixup, or PatchBay descriptor;
+runtime replacement remains unproven.
 
 The direct GXF `map` route has a separate range guard before
 `__rtk_mmu_map`; the mapping handler itself retains only the translation-region
 lookup through `_mmu_get_tt_info` plus attribute decoding. This places the
-unresolved authorization boundary at the UPPL table producer rather than at
-the handler body. `23A355` also adds encoded attribute class `0x8000` (emitting
+unresolved GFX-side authorization boundary at route selection and context
+state, not at a proven UPPL table producer. `23A355` also adds encoded
+attribute class `0x8000` (emitting
 descriptor value `0x419`) and a context-switch check over state byte `+0x638`
 and argument bit `x2[0]`. These are exact static deltas, not assigned policy
 names or evidence of reachability. The durable checkpoint and next analysis
 task are recorded in [A15 / iOS 26.0.1 Research Worklog](A15_IOS26_WORKLOG.md).
+
+The reverse SPTM pass now identifies endpoint 4 at `0xfffffff0270a1d58` as a
+request producer: it validates a type-`0xb` segment-descriptor frame and calls
+endpoint 5 / `sptm_uat_map_continue` at `0xfffffff0270a1ef0`. Continuation
+requires type `0x17` for page-table frames; `iommu_register_mapping` uses
+`0x42` as a wildcard selector before applying the actual frame type's domain
+and mapping-class policy. Selector-1 GFX-data registration accepts existing
+protected region type `2`, whose policy row has no allowed domain and maximum
+mapping class `0`. The registered region is therefore not a direct UAT leaf
+target. This reconnects structurally to the shared GFX handoff, but does not
+yet prove a direct edge from GXF command `0x10` to either endpoint.
+
+The reverse GFX pass recovers that command's immediate firmware constructor at
+`0xffffff80000339f8`, its wrapper submission at `0xffffff8000033a28`, and the
+route through `__mmu_gxf_enter`, the direct dispatcher, and
+`__rtk_mmu_map`. The packet stores command `0x10`, a payload pointer, and four
+arguments. No UAT ID-7 value, branch to endpoint 4/5, packet translation, or
+common packet layout appears on this route. GXF `0x10` and SPTM UAT 4/5 are
+therefore separate interfaces participating in the same UAT architecture.
 
 ## Mapping to the Current iPhone14,2 / 23A355 Trace
 

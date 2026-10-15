@@ -1236,7 +1236,7 @@ def analyze_uppl_dispatcher(
         None,
     )
     table_status = (
-        "RUNTIME_POPULATED"
+        "ZERO_DEFAULT_PRODUCER_UNRESOLVED"
         if static_count == 0 and static_table == 0
         else "STATIC_VALUES_PRESENT"
     )
@@ -1280,7 +1280,7 @@ def analyze_uppl_dispatcher(
         ),
         "limitations": (
             "The packaged image contains zero count/table values, so handler indices "
-            "cannot be assigned statically from this payload."
+            "cannot be assigned statically and no runtime producer may be assumed."
         ),
     }
 
@@ -1414,15 +1414,15 @@ def analyze_mmu_mapping_contract(
             "observed": bool(context_state_guard and authorization_flag),
         },
         "authorization_boundary": (
-            "UPPL_RUNTIME_TABLE_PRODUCER"
+            "UPPL_PRODUCER_UNRESOLVED"
             if has_uppl
             else "DIRECT_GXF_DISPATCHER"
         ),
         "interpretation": (
             "The mapping handlers validate translation-region bounds through "
             "_mmu_get_tt_info. A separate range guard is visible at direct GXF "
-            "ingress, not inside __rtk_mmu_map; on UPPL builds the runtime table "
-            "producer must therefore preserve any additional page-authorization policy."
+            "ingress, not inside __rtk_mmu_map; if an external UPPL producer exists, "
+            "it must therefore preserve any additional page-authorization policy."
         ),
         "limitations": (
             "Static call-graph evidence only. It does not identify the runtime UPPL "

@@ -18,8 +18,16 @@ they do not establish a signing oracle or a bypass.
 The same GFX pass reconstructs the GXF entry routes, the static UPPL packet
 layout, authenticated dispatch form, packaged table state, mapping-handler
 calls, range-guard candidates, accepted attribute classes, and context-switch
-guard. A runtime-populated zero table is reported as unresolved rather than
-being assigned speculative handler indices.
+guard. A zero default with no established producer is reported as unresolved
+rather than being assigned speculative handler indices.
+
+`analyze_agx_uppl_producer.py` compares the exact iOS 17 and iOS 26 AGX/SPTM
+handoff paths with the iOS 26 GFX image. It decodes PatchBay records, checks
+Mach-O symbol and relocation metadata for the UPPL state, and distinguishes a
+weak zero default from a demonstrated producer. It also reconstructs the
+shared SPTM/GFX handoff, dynamic GFX segment registration, and the downstream
+UAT frame-type/domain/mapping-policy checks. It performs no live protected
+component request.
 
 `analyze_vtable_fields.py` decodes authenticated chained vtable entries in an
 offline kernelcache and reports accesses to selected object-field offsets.
@@ -58,6 +66,15 @@ python tools/a15_ios26/compare_gfx_security.py \
   --image 23A355=gfx-23A355.bin \
   --output gfx-security-comparison.md \
   --json-output gfx-security-comparison.json
+
+python tools/a15_ios26/analyze_agx_uppl_producer.py \
+  --ios17-kernel kernelcache-21B91.bin \
+  --ios17-sptm sptm-21B91.bin \
+  --ios26-kernel kernelcache-23A355.bin \
+  --ios26-sptm sptm-23A355.bin \
+  --ios26-gfx gfx-23A355.bin \
+  --output agx-uppl-producer.md \
+  --json-output agx-uppl-producer.json
 
 python tools/a15_ios26/build_response_trace.py \
   --titan-report titan-static-report.json \
@@ -136,8 +153,8 @@ permission bitset; it remains distinct from the state machine's event index.
 
 Endpoint-table anchors are static provenance, not a request recipe. An entry
 without a directly referenced `sptm_*` anchor remains unnamed, and the SPTM
-UAT table is not equated with GFX's separately runtime-populated UPPL handler
-table without a direct producer-side reference.
+UAT table is not equated with GFX's separate zero-default UPPL handler table
+without a direct producer-side reference.
 
 The Titan report has the same limitation. A static PASS does not validate the
 live RTKit state, command-buffer setup, GFX ROP trigger, or physical-write
