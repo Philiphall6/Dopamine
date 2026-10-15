@@ -311,6 +311,11 @@ traversal. No successful controlled mapping window, unrestricted physical
 write, or SPTM bypass has yet been observed on-device. The static TXM base and
 passing XPF relationships therefore remain evidence, not a bypass claim.
 
+The complete iOS 17 mechanism, including the MDSID write primitive, AGX
+hibernation transition, self-referencing AP PTE, patch boundaries, and direct
+mapping to the 23A355 trace, is reconstructed in
+[Titan iOS 17 SPTM Bypass: Source-Level Reconstruction](TITAN_IOS17_SPTM_BYPASS_DEEP_DIVE.md).
+
 ## Diagnostic Response Logging
 
 Every future diagnostic observation should record a timestamp, stage identifier,
