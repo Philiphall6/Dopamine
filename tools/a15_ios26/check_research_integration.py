@@ -283,12 +283,34 @@ def main() -> int:
         "kIOS2601AppleARMIODeviceVtable",
         "kIOS2601IOGeneralMemoryDescriptorVtable",
         "kIOS2601IOMemoryMapVtable",
+        "kIOS2601GFXIORVBARPhysicalAddress = 0x206050000ULL",
+        "kIOS2601GFXIORVBARLength = 0x8ULL",
+        "descriptorPhysical != kIOS2601GFXIORVBARPhysicalAddress",
+        "descriptorLength != kIOS2601GFXIORVBARLength",
         "fMemory != descriptor",
         "fOffset != 0",
-        "fLength != 8",
+        "fLength != kIOS2601GFXIORVBARLength",
+        'titan_checkpoint(@"titan.iorvbar.descriptor-range"',
+        'titan_checkpoint(@"titan.rop-wait-thread"',
         'titan_checkpoint(@"titan.rop-trigger"',
+        "int triggerResult = gfx_write32",
     ):
         require(marker in titan, f"active Titan adaptation is missing marker: {marker}")
+    for marker in (
+        "!titan_gadget(tpidrro_el0)",
+        "!titan_gadget(write)",
+        "!titan_gadget(rop_invoke)",
+        "!titan_gadget(cache_flush)",
+        "!titan_gadget(spin)",
+        "!titan_address(power_thread)",
+        "!titan_address(target_job)",
+        "!titan_address(arm_hb_context)",
+    ):
+        require(marker in gfx_patchfinder, f"GFX ROP validation is missing marker: {marker}")
+    require(
+        'A15ActiveProbeCheckpoint(@"probe.cleanup"' in active_body,
+        "active probe does not record exploit cleanup",
+    )
     require(
         "0xffffffec9be40000" not in titan,
         "per-boot IORVBAR kernel mapping was hard-coded into Titan",

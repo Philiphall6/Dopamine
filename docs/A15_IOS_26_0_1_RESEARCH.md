@@ -47,12 +47,17 @@ check, and the UI exposes the path only through
 `isA15IOS2601ResearchTarget`. Titan dynamically locates `gfx-asc`, validates the
 expected `AppleARMIODevice`, `IOGeneralMemoryDescriptor`, and `IOMemoryMap`
 vtables, follows the proven IORegistry collection chain, and requires
-`fMemory` linkage, zero `fOffset`, eight-byte `fLength`, and a valid kernel
-`fAddress` before reading the IORVBAR.
+the descriptor's exact `0x206050000/0x8` physical range, `fMemory` linkage,
+zero `fOffset`, eight-byte `fLength`, and a valid kernel `fAddress` before
+reading the IORVBAR. The IOKit service right remains alive through that full
+validation.
 
 Every stage appends one JSON object to
 `Documents/a15-ios26-active-probe.jsonl` and calls `fsync`. Consequently, a
 process termination or device restart leaves the last completed stage on disk.
+Before the GFX trigger, every required ROP target must be nonzero. Thread
+creation and command submission have separate PASS/FAIL checkpoints, and the
+probe records exploit/IOSurface cleanup before returning.
 The route intentionally returns after Titan publishes its physical-write
 callback; it does not call Dopamine's physrw builder, privilege elevation,
 trust-cache, or bootstrap code.
@@ -728,7 +733,10 @@ Consequences:
 
 - Never reuse a per-boot kernel virtual address from a previous capture.
 - Never create a replacement IORVBAR mapping; use only the validated existing map.
+- Require the live descriptor itself to match physical range `0x206050000/0x8`.
 - Reject every machine/build except iPhone14,2/23A355.
+- Reject a missing GFX ROP target, wait-thread failure, or failed command
+  submission before interpreting the timeout result.
 - Treat the last durable checkpoint as the boundary reached, not as proof that
   the next operation completed.
 - Do not continue into physrw construction, privilege changes, trust caches, or

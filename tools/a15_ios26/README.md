@@ -129,8 +129,10 @@ The app-side research status and its target gate are documented in
 `docs/A15_IOS_26_0_1_RESEARCH.md`. Titan remains outside the general iOS 26
 range and receives one build-and-device-specific metadata include. The probe
 rediscovers the existing IORVBAR mapping on each run, writes fsync-backed JSONL
-checkpoints, and stops before Dopamine constructs physrw, changes privileges,
-or installs a bootstrap. Validate these constraints with:
+checkpoints, validates the descriptor's exact `0x206050000/0x8` range and all
+required GFX ROP targets, and records thread creation, command submission, and
+cleanup separately. It stops before Dopamine constructs physrw, changes
+privileges, or installs a bootstrap. Validate these constraints with:
 
 ```sh
 python tools/a15_ios26/check_research_integration.py

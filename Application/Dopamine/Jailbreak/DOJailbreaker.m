@@ -314,7 +314,7 @@ static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString
     NSString *kernelDetail = [NSString stringWithFormat:@"base=0x%llx magic=0x%llx", kernelBase, kernelMagic];
     if (kernelMagic != 0x100000cfeedfacfULL) {
         A15ActiveProbeCheckpoint(@"kernel.primitive", @"FAIL", kernelDetail);
-        [kernelExploit cleanup];
+        [self cleanUpExploits];
         *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey: @"Kernel read primitive did not return a valid Mach-O header."}];
         return;
     }
@@ -324,7 +324,7 @@ static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString
     if ([titan load] != 0) {
         NSString *detail = [NSString stringWithFormat:@"%s", dlerror() ?: "dlopen failed"];
         A15ActiveProbeCheckpoint(@"titan.load", @"FAIL", detail);
-        [kernelExploit cleanup];
+        [self cleanUpExploits];
         *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey: detail}];
         return;
     }
@@ -334,18 +334,25 @@ static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString
     int titanResult = [titan run];
     if (titanResult != 0) {
         A15ActiveProbeCheckpoint(@"titan.run", @"FAIL", [NSString stringWithFormat:@"return=%d; inspect previous checkpoint", titanResult]);
-        [titan cleanup];
-        [kernelExploit cleanup];
+        NSError *cleanupError = [self cleanUpExploits];
+        A15ActiveProbeCheckpoint(@"probe.cleanup", cleanupError ? @"FAIL" : @"PASS", cleanupError.localizedDescription ?: @"");
         *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{
             NSLocalizedDescriptionKey: @"Titan stopped at a validated stage. Read Documents/a15-ios26-active-probe.jsonl for the first failing checkpoint."
         }];
         return;
     }
 
-    NSString *publishStatus = gPrimitives.physwritebuf ? @"PASS" : @"FAIL";
+    BOOL publishedPhysicalWrite = gPrimitives.physwritebuf != NULL;
+    NSString *publishStatus = publishedPhysicalWrite ? @"PASS" : @"FAIL";
     A15ActiveProbeCheckpoint(@"titan.physwrite.publish", publishStatus, @"probe stops before physrw construction and privilege changes");
-    A15ActiveProbeCheckpoint(@"probe.complete", @"PASS", @"Titan returned; no bootstrap or privilege stage executed");
-    if (!gPrimitives.physwritebuf) {
+    NSError *cleanupError = [self cleanUpExploits];
+    A15ActiveProbeCheckpoint(@"probe.cleanup", cleanupError ? @"FAIL" : @"PASS", cleanupError.localizedDescription ?: @"");
+    if (cleanupError) {
+        *errOut = cleanupError;
+        return;
+    }
+    A15ActiveProbeCheckpoint(@"probe.complete", publishedPhysicalWrite ? @"PASS" : @"FAIL", @"Titan returned; no physrw builder, privilege, or bootstrap stage executed");
+    if (!publishedPhysicalWrite) {
         *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey: @"Titan returned without publishing a physical-write primitive."}];
     }
 }
