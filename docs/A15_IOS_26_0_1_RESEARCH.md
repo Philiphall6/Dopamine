@@ -969,6 +969,44 @@ lists AMFI, trust-cache, PAC, and PPL steps as blocked. DSPloit therefore
 contains useful DarkSword-derived experiments, but no validated A15/23A355
 SPTM/TXM bypass or complete jailbreak chain that can be transplanted here.
 
+### CVE-2026-43748 ANE Direct-Path Assessment
+
+The public `vschko/CaseStudies` write-up describes an out-of-bounds kernel
+heap write in the Apple Neural Engine direct path. `ANE_ProgramSendRequest`
+accepts as many as `0xff` IOSurfaces across its buffer lists, while
+`ANEHWDevice::ANE_ProgramCheckandPrewireBuffers_gated` allocates storage for
+only `0x80` 16-byte entries. The reported maximum overwrite is therefore
+approximately `(0xff - 0x80) * 0x10 = 0x7f0` bytes in `data.kalloc.3072`.
+The direct-path user client is reported as reachable from an application
+sandbox without a dedicated entitlement.
+
+Apple classifies CVE-2026-43748 as an Apple Neural Engine out-of-bounds write
+whose public impact is unexpected system termination. Its iOS 26.6 advisory
+lists iPhone 11 and later as affected devices and says the issue was fixed by
+improved bounds checking. This makes the iPhone14,2 on 23A355 a likely affected
+target, but the advisory does not establish identical exploitability or object
+layout on this exact build.
+
+The local exact-target kernelcache provides stronger structural evidence. The
+23A355 `RELEASE_ARM64_T8110` image has SHA-256
+`8867208C59BFA426611C36FCFE570FFC41CC75EE293472FE7197860D0C5223F1` and contains
+`ANE_ProgramCheckandPrewireBuffers_gated`, `ANE_ProgramSendRequest`,
+`H11ANEInDirectPathClient`, `H1xANELoadBalancerDirectPathClient`,
+`kANEMaxBuffers`, and `programSendRequest`. Current evidence status is
+`STRUCTURALLY_PRESENT / CONSTANTS_AND_CONTROL_FLOW_NOT_YET_VERIFIED`: the
+relevant driver path is present, but the `0xff` versus `0x80` mismatch and the
+late validation order still need exact-build disassembly confirmation.
+
+This CVE does not fill the current Titan/SPTM gap. The public iOS proof of
+concept repeatedly invokes CoreML until an MTE-related panic and does not claim
+a stable kernel read/write primitive, protected physical write, accepted SPTM
+request, trust-cache insertion, or TXM bypass. This project already has a
+working ClearSword kernel primitive on the target, so CVE-2026-43748 is best
+treated as an independent heap-corruption and reliability research path, not a
+replacement for the missing SPTM transition. The panic-oriented proof of
+concept must not be integrated into the diagnostic IPA. Static comparison with
+the iOS 26.6 fix should precede any bounded device probe.
+
 Other useful repositories remain analysis infrastructure rather than an
 on-device bypass: `Lessica/libgrabkernel2` can extract the A15 23A355
 kernelcache efficiently; `cloverfield11/ios26-hypervisor-research` documents
@@ -995,6 +1033,9 @@ Primary references:
 - https://github.com/Indegosblade/pmap-tte-remove
 - https://github.com/tosoonmulu123-ui/DSPloit
 - https://github.com/tosoonmulu123-ui/DSPloit/blob/main/context_transfer.md
+- https://github.com/vschko/CaseStudies/tree/main/CVE-2026-43748
+- https://github.com/vschko/CaseStudies/blob/main/CVE-2026-43748/pocs/ios_poc/poc-ane/ViewController.m
+- https://support.apple.com/en-us/128066
 - https://github.com/Lessica/libgrabkernel2/blob/main/docs/aea-fast-path.md
 - https://github.com/cloverfield11/ios26-hypervisor-research
 - https://github.com/jprx/qemu-sptm
