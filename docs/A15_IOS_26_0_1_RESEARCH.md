@@ -471,7 +471,27 @@ Those observations are not target-version evidence. They do not establish that
 the A15/iOS 26.0.1 request boundary, handler, or return path has been reached.
 The structured comparison is recorded in
 `docs/SPTM_IOS17_IOS26_STATIC_COMPARISON.md`.
-The phase 5 reproducible build and device result are pending.
+It also records the post-iOS-17 Titan hardening sequence and the bounded role
+of `qemu-sptm`/`darwin-vm` as an emulator-based comparison environment.
+
+The reproducible phase 5 build completed successfully on 2026-10-15:
+
+- Source commit: `38abc22d40f9c439750089d3473c2c03f0224e6d`
+- GitHub Actions run: `38700381273` (successful in 13m 42s)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-v5-38abc22.ipa`
+- Size: `55,449,632` bytes
+- SHA-256: `7198C453407AA069973BADDBDAE501FEB1C5B235FB5E7E326E72B1743BAF68C8`
+
+Post-build inspection confirms the v5 schema and output filename, the exact
+read-only plus avoid-sync lock mode, the single lock/unlock lifecycle, and the
+negative `memory_written` marker in the main executable. Titan's declared iOS
+`16.1` through `17.3.1` range remains unchanged.
+
+The phase 4-backed response trace v2 is recorded as JSON with SHA-256
+`431954B2507F5F0E633D6B6A9607C523EB29B5869C90B2F36281C2317A71D235`
+and Markdown with SHA-256
+`DEC0B82C5E536B7F0F0CF6329A411C5B9F0878AE6ED181E38F369A28D8284E6E`.
+The phase 5 on-device result remains pending.
 
 ## Remaining Hypotheses
 
