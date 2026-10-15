@@ -911,6 +911,79 @@ Primary references:
 - https://github.com/P013onEr/RootHide/commit/6fa2ddf2021e4914cc9c7eec58cae7682b15fbbf
 - https://github.com/opa334/Dopamine/pull/1038
 
+## Broader Public GitHub Survey
+
+A broader GitHub review on 2026-10-15 found public A15/23A355 material, but
+no independently verified full jailbreak or SPTM/TXM bypass for
+`iPhone14,2` on iOS 26.0.1.
+
+`rooootdev/lara` and its derivatives contain the most relevant public
+DarkSword work outside Dopamine. Lara advertises iOS 26.0-26.0.1 support and
+contains A15-specific offset handling. Pull request 323 contributes an
+XPF-derived `proc.p_name` value for an A15/T8110 23A355 kernelcache. This is
+useful exact-build structure evidence, but Lara is a customization toolbox,
+not a published Titan or SPTM bypass. Its issue tracker also documents that
+RemoteCall remains unreliable on protected modern targets.
+
+`kaffeindecaf/W0lfSword` has a substantial host-side A15/23A355 research set.
+It verified the T8110 kernelcache, `task.itk_space=0x310`,
+`proc.struct_size=0x748`, and SPTM presence. Its own testing record states that
+the A15/iPhone14,7 device was used only for read-only USB, syslog, crash-report,
+and offline kernelcache work; the full DarkSword run was initially not tested.
+A later roadmap entry records that the staged A15/26.0.1 device run panicked.
+This is valuable negative evidence and offset data, not a successful A15
+chain.
+
+`0xjohnnydev/cyanide` and FilzaJailedDS-derived projects expose DarkSword
+kernel-read/write and RemoteCall-based customization over the affected iOS
+window. They explicitly describe themselves as tweak runners or file-manager
+escapes rather than traditional jailbreaks. Public compatibility tables cover
+iOS 26.0-26.0.1, but they do not publish a validated A15 SPTM physical-write,
+trust-cache, or bootstrap path.
+
+`Indegosblade/pmap-tte-remove` documents a separate physical use-after-free
+primitive. The repository reports 64/64 write-through on A17 Pro and A19, but
+its limitations section explicitly says controlled reclaim is blocked by SPTM
+quarantine on A14+ and that exploitation beyond the primitive requires an
+unknown quarantine bypass. It therefore confirms a promising primitive class,
+not an A15 jailbreak path.
+
+`tosoonmulu123-ui/DSPloit` claims full A15/iOS 26.0.1 support in its README,
+but its own context-transfer document says device confirmation was performed
+only on an iPhone XR with iOS 18.2 and lists AMFI, trust-cache, PAC, and PPL
+steps as blocked. Its A15 compatibility claim is not accepted as validation.
+
+Other useful repositories remain analysis infrastructure rather than an
+on-device bypass: `Lessica/libgrabkernel2` can extract the A15 23A355
+kernelcache efficiently; `cloverfield11/ios26-hypervisor-research` documents
+SPTM virtualization statically; `jprx/qemu-sptm` and `Xplo8E/vphone-cli`
+support emulation or virtualized firmware study. None supplies the missing
+exact-target Titan/SPTM transition.
+
+The practical conclusion is narrower than the number of GitHub claims:
+public work supports A15 kernelcache analysis and DarkSword/ClearSword kernel
+read/write experimentation, but the verified public chain still stops before
+an A15/23A355 protected physical-write or equivalent SPTM/TXM bypass. The live
+bounded trace in this project currently provides stronger exact-target Titan
+progress evidence than the reviewed public repositories.
+
+Primary references:
+
+- https://github.com/rooootdev/lara
+- https://github.com/rooootdev/lara/pull/323
+- https://github.com/kaffeindecaf/W0lfSword
+- https://github.com/kaffeindecaf/W0lfSword/blob/main/TESTING.md
+- https://github.com/kaffeindecaf/W0lfSword/blob/main/ROADMAP.md
+- https://github.com/0xjohnnydev/cyanide
+- https://github.com/34306/FilzaJailedDS
+- https://github.com/Indegosblade/pmap-tte-remove
+- https://github.com/tosoonmulu123-ui/DSPloit
+- https://github.com/tosoonmulu123-ui/DSPloit/blob/main/context_transfer.md
+- https://github.com/Lessica/libgrabkernel2/blob/main/docs/aea-fast-path.md
+- https://github.com/cloverfield11/ios26-hypervisor-research
+- https://github.com/jprx/qemu-sptm
+- https://github.com/Xplo8E/vphone-cli
+
 ## pois0nSword Parallel Comparison
 
 `GenericCoding/pois0nSword` was reviewed at commit
