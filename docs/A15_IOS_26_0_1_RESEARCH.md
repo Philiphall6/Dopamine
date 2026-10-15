@@ -12,23 +12,23 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_DESCRIPTOR_RANGE_FIX_SOURCE_READY`
+- Research state: `ACTIVE_TITAN_PROBE_DESCRIPTOR_RANGE_FIX_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `1673566`
-- GitHub Actions run: `38730539055` (`PASS`, 12m 06s)
-- IPA: `Dopamine-A15-iOS26-exact-read-1673566.ipa`
-- Size: `55,466,517` bytes
-- SHA-256: `18A0A8A192B3B1F7377FB68137D81C7D06FD5AC5E8FBD3AC07F613691861ACAE`
+- Source commit: `c703565`
+- GitHub Actions run: `38744742848` (`PASS`, 12m 17s)
+- IPA: `Dopamine-A15-iOS26-descriptor-range-c703565.ipa`
+- Size: `55,467,087` bytes
+- SHA-256: `129875269658A5857065BB64A9161A5A8FCEB1E9CDD9D17ACCC1B37D38ADE65F`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` are present.
 
-The packaged ClearSword binary exports `clearsword_kreadbuf_exact` at image
-offset `0x4810`. The packaged Titan binary contains the exact-read symbol name,
-failure markers, and successful eight-byte-read marker. This build was run on
-the target and completed every small-allocation pointer read without a panic.
+The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
+packaged Titan binary contains all nine exact-read checkpoints for the map and
+descriptor fields. The preceding `1673566` build validated the exact-read
+adapter on-device; this descriptor-range build has not yet been run.
 
 ## First Active Device Result
 
