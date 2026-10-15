@@ -12,24 +12,25 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_PROC_NAME_DISCOVERY_READY`
+- Research state: `ACTIVE_TITAN_PROBE_PROC_NAME_DISCOVERY_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `c703565`
-- GitHub Actions run: `38744742848` (`PASS`, 12m 17s)
-- IPA: `Dopamine-A15-iOS26-descriptor-range-c703565.ipa`
-- Size: `55,467,087` bytes
-- SHA-256: `129875269658A5857065BB64A9161A5A8FCEB1E9CDD9D17ACCC1B37D38ADE65F`
+- Source commit: `a720b8a`
+- GitHub Actions run: `38748664669` (`PASS`, 12m 22s)
+- IPA: `Dopamine-A15-iOS26-proc-name-a720b8a.ipa`
+- Size: `55,469,034` bytes
+- SHA-256: `5160FFA45D38861C5452513FACD6C5CEA949F9EA059A645F7B23E6022E179206`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` are present.
 
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
 packaged Titan binary contains all nine exact-read checkpoints for the map and
-descriptor fields. The `c703565` descriptor-range build has now passed those
-checks on-device; the next source revision addresses the newly exposed process
-lookup blocker and still requires CI packaging.
+descriptor fields plus the bounded `titan.proc-name-offset` and
+`titan.proc-by-name` markers. The `c703565` descriptor-range build passed its
+checks on-device; `a720b8a` packages the newly exposed process-lookup fix and
+awaits its first device run.
 
 ## First Active Device Result
 
