@@ -12,8 +12,22 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_SOURCE_READY`
+- Research state: `ACTIVE_TITAN_PROBE_IPA_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
+
+## Latest Build Evidence
+
+- Source commit: `16487f1`
+- GitHub Actions run: `38724149742` (`PASS`)
+- IPA: `Dopamine-A15-iOS26-active-titan-probe-16487f1.ipa`
+- Size: `55,465,418` bytes
+- SHA-256: `40F65381CD46191F33FA4F6E1F5AF007EF6BE699453108CC76E79697EB888684`
+- Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
+  `Frameworks/Titan.framework/Titan` are present.
+
+This build result proves source integration and packaging only. All active
+Titan checkpoints remain `DEVICE_RESULT_PENDING` until this exact IPA is run on
+the target and its JSONL trace is recovered.
 
 ## End-to-End Chain Status
 
@@ -721,7 +735,7 @@ or build.
 
 ## Blockers
 
-### ACTIVE_TITAN_PROBE_SOURCE_READY
+### ACTIVE_TITAN_PROBE_IPA_BUILT
 
 The legacy `IOMemoryMap::wireRange` signature resolves an impossible `+0x260`
 field offset and remains rejected. The active path instead rediscovers the

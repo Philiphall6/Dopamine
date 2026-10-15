@@ -240,7 +240,7 @@ def main() -> int:
         "CFRelease(standardSurface)" in diagnostic_body,
         "standard IOSurface is not released",
     )
-    require("ACTIVE_TITAN_PROBE_SOURCE_READY" in report, "report does not record the active-probe state")
+    require("ACTIVE_TITAN_PROBE_IPA_BUILT" in report, "report does not record the built active-probe state")
     for marker in ("0xfffffff007aaaf58", "dictionary=+0x20", "16-byte"):
         require(marker in report, f"report is missing OSDictionary evidence: {marker}")
     require("fAddress=+0x28" in report, "report is missing the validated map offset")
