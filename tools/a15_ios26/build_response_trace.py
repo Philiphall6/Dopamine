@@ -40,9 +40,18 @@ def make_stage(
     }
 
 
-def build_trace(titan: dict[str, Any], sptm_txm: dict[str, Any]) -> dict[str, Any]:
+def build_trace(
+    titan: dict[str, Any],
+    sptm_txm: dict[str, Any],
+    device_diagnostic: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if titan.get("diagnostic_only") is not True:
         raise ValueError("Titan report is not marked diagnostic-only")
+    if device_diagnostic is not None:
+        if device_diagnostic.get("diagnostic_only") is not True:
+            raise ValueError("Device report is not marked diagnostic-only")
+        if device_diagnostic.get("asserts_live_sptm_txm_response") is not False:
+            raise ValueError("Device report does not explicitly reject a live SPTM/TXM claim")
 
     live = titan.get("live_layout", {})
     kernel = titan.get("kernel", {})
@@ -50,6 +59,14 @@ def build_trace(titan: dict[str, Any], sptm_txm: dict[str, Any]) -> dict[str, An
     txm = sptm_txm.get("txm", {})
     sptm = sptm_txm.get("sptm", {})
     sptm_kernel = sptm_txm.get("kernel", {})
+    device_events = {
+        event.get("checkpoint"): event
+        for event in (device_diagnostic or {}).get("events", [])
+        if isinstance(event, dict) and isinstance(event.get("checkpoint"), str)
+    }
+    eligible_counts = (device_diagnostic or {}).get("selector_counts", {}).get("eligible", {})
+    kernel_metadata_count = eligible_counts.get("Kernel")
+    ppl_metadata_count = eligible_counts.get("PPL")
 
     identity_ok = all(
         live.get(key) == expected
@@ -116,6 +133,38 @@ def build_trace(titan: dict[str, Any], sptm_txm: dict[str, Any]) -> dict[str, An
             "PAPT and SPTM argument relationships",
         ),
         make_stage(
+            "device.app_owned_vm",
+            "OBSERVED"
+            if device_events.get("runtime.app_owned_vm", {}).get("status") == "PASS"
+            else "INCOMPLETE",
+            "bounded-device-diagnostic",
+            "app-owned allocation and deallocation only; no write",
+        ),
+        make_stage(
+            "device.standard_iosurface",
+            "OBSERVED"
+            if device_events.get("runtime.standard_iosurface", {}).get("status") == "PASS"
+            else "INCOMPLETE",
+            "bounded-device-diagnostic",
+            "ordinary private IOSurface lifecycle only",
+        ),
+        make_stage(
+            "selector.kernel_metadata",
+            "INCOMPLETE"
+            if kernel_metadata_count is None
+            else ("METADATA_ELIGIBLE" if kernel_metadata_count > 0 else "MISSING"),
+            "packaged-framework-metadata",
+            f"eligible={kernel_metadata_count}; runtime primitive not inferred",
+        ),
+        make_stage(
+            "selector.ppl_metadata",
+            "INCOMPLETE"
+            if ppl_metadata_count is None
+            else ("METADATA_ELIGIBLE" if ppl_metadata_count > 0 else "MISSING"),
+            "packaged-framework-metadata",
+            f"eligible={ppl_metadata_count}; metadata only",
+        ),
+        make_stage(
             "kernel.runtime_read_write",
             "MISSING",
             "chain-contract",
@@ -141,10 +190,24 @@ def build_trace(titan: dict[str, Any], sptm_txm: dict[str, Any]) -> dict[str, An
         ),
     ]
 
+    first_metadata_blocker = (
+        "selector.kernel_metadata"
+        if kernel_metadata_count == 0
+        else ("selector.ppl_metadata" if ppl_metadata_count == 0 else None)
+    )
+    first_runtime_blocker = (
+        None
+        if device_events.get("kernel.runtime_read_write", {}).get("status") == "PASS"
+        else "kernel.runtime_read_write"
+    )
+
     return {
-        "schema": "dopamine.a15-ios26.response-trace.v1",
+        "schema": "dopamine.a15-ios26.response-trace.v2",
         "diagnostic_only": True,
         "asserts_live_sptm_txm_response": False,
+        "first_metadata_blocker": first_metadata_blocker,
+        "first_runtime_blocker": first_runtime_blocker,
+        "protected_component_boundary": "NOT_REACHED",
         "target": {
             "device": live.get("device"),
             "soc": live.get("soc"),
@@ -174,6 +237,10 @@ def build_trace(titan: dict[str, Any], sptm_txm: dict[str, Any]) -> dict[str, An
                 "num_output_args",
             ],
             "response_fields": ["txm_ret", "num_return_words", "return_words"],
+            "request_generated": False,
+            "request_transmitted": False,
+            "handler_dispatched": False,
+            "response_received": False,
             "runtime_values": None,
             "runtime_values_status": "NOT_REACHED",
         },
@@ -193,6 +260,12 @@ def render_markdown(trace: dict[str, Any]) -> str:
         ),
         "",
         "This trace does not assert that a live SPTM/TXM request was issued.",
+        "",
+        (
+            f"First metadata blocker: `{trace.get('first_metadata_blocker')}`. "
+            f"First runtime blocker: `{trace.get('first_runtime_blocker')}`. "
+            f"Protected-component boundary: `{trace.get('protected_component_boundary')}`."
+        ),
         "",
         "## Published TXM call contract",
         "",
@@ -215,6 +288,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--titan-report", type=Path, required=True)
     parser.add_argument("--sptm-txm-report", type=Path, required=True)
+    parser.add_argument("--device-diagnostic", type=Path)
     parser.add_argument("--json-output", type=Path, required=True)
     parser.add_argument("--markdown-output", type=Path, required=True)
     return parser.parse_args()
@@ -222,7 +296,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    trace = build_trace(load_json(args.titan_report), load_json(args.sptm_txm_report))
+    device_diagnostic = load_json(args.device_diagnostic) if args.device_diagnostic else None
+    trace = build_trace(
+        load_json(args.titan_report),
+        load_json(args.sptm_txm_report),
+        device_diagnostic,
+    )
     args.json_output.parent.mkdir(parents=True, exist_ok=True)
     args.markdown_output.parent.mkdir(parents=True, exist_ok=True)
     args.json_output.write_text(json.dumps(trace, indent=2) + "\n", encoding="utf-8")

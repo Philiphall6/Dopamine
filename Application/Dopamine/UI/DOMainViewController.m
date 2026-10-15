@@ -430,12 +430,25 @@
         size_t standardSurfaceHeight = 0;
         size_t standardSurfaceBytesPerRow = 0;
         size_t standardSurfaceAllocSize = 0;
+        uint32_t standardSurfaceLockSeed = 0;
+        uint32_t standardSurfaceUnlockSeed = 0;
+        kern_return_t standardSurfaceLockStatus = KERN_FAILURE;
+        kern_return_t standardSurfaceUnlockStatus = KERN_FAILURE;
+        uint32_t standardSurfaceLockOptions = kIOSurfaceLockReadOnly | kIOSurfaceLockAvoidSync;
+        BOOL standardSurfaceLocked = NO;
+        BOOL standardSurfaceUnlocked = NO;
         BOOL standardSurfaceReleased = NO;
         if (standardSurface != NULL) {
             standardSurfaceWidth = IOSurfaceGetWidth(standardSurface);
             standardSurfaceHeight = IOSurfaceGetHeight(standardSurface);
             standardSurfaceBytesPerRow = IOSurfaceGetBytesPerRow(standardSurface);
             standardSurfaceAllocSize = IOSurfaceGetAllocSize(standardSurface);
+            standardSurfaceLockStatus = IOSurfaceLock(standardSurface, standardSurfaceLockOptions, &standardSurfaceLockSeed);
+            standardSurfaceLocked = standardSurfaceLockStatus == KERN_SUCCESS;
+            if (standardSurfaceLocked) {
+                standardSurfaceUnlockStatus = IOSurfaceUnlock(standardSurface, standardSurfaceLockOptions, &standardSurfaceUnlockSeed);
+                standardSurfaceUnlocked = standardSurfaceUnlockStatus == KERN_SUCCESS;
+            }
             CFRelease(standardSurface);
             standardSurface = NULL;
             standardSurfaceReleased = YES;
@@ -448,16 +461,27 @@
             @"height": @(standardSurfaceHeight),
             @"bytes_per_row": @(standardSurfaceBytesPerRow),
             @"allocation_size": @(standardSurfaceAllocSize),
+            @"lock_status": @(standardSurfaceLockStatus),
+            @"unlock_status": @(standardSurfaceUnlockStatus),
+            @"lock_seed": @(standardSurfaceLockSeed),
+            @"unlock_seed": @(standardSurfaceUnlockSeed),
+            @"locked": @(standardSurfaceLocked),
+            @"unlocked": @(standardSurfaceUnlocked),
+            @"lock_read_only": @YES,
+            @"lock_avoid_sync": @YES,
+            @"memory_written": @NO,
             @"base_address_accessed": @NO,
             @"mach_port_created": @NO,
             @"prefetch_called": @NO,
             @"memory_region_requested": @NO,
             @"iokit_called": @NO,
         };
-        record(@"runtime.standard_iosurface", standardSurfaceReleased ? @"PASS" : @"FAIL",
-               [NSString stringWithFormat:@"width=%lu height=%lu row=%lu allocation=%lu released=%@",
+        BOOL standardSurfaceLifecycleComplete = standardSurfaceLocked && standardSurfaceUnlocked && standardSurfaceReleased;
+        record(@"runtime.standard_iosurface", standardSurfaceLifecycleComplete ? @"PASS" : @"FAIL",
+               [NSString stringWithFormat:@"width=%lu height=%lu row=%lu allocation=%lu lock=%d unlock=%d released=%@ memory-written=false",
                 (unsigned long)standardSurfaceWidth, (unsigned long)standardSurfaceHeight,
                 (unsigned long)standardSurfaceBytesPerRow, (unsigned long)standardSurfaceAllocSize,
+                standardSurfaceLockStatus, standardSurfaceUnlockStatus,
                 standardSurfaceReleased ? @"true" : @"false"]);
 
         NSMutableArray<NSDictionary *> *exploitMatrix = [NSMutableArray new];
@@ -549,7 +573,7 @@
         record(@"sptm_txm.runtime_response", @"NOT_REACHED", @"no-protected-component-request-issued");
 
         NSDictionary *report = @{
-            @"schema": @"dopamine.a15-ios26.device-diagnostic.v4",
+            @"schema": @"dopamine.a15-ios26.device-diagnostic.v5",
             @"diagnostic_only": @YES,
             @"asserts_live_sptm_txm_response": @NO,
             @"target": @{
@@ -572,10 +596,10 @@
 
         NSError *jsonError = nil;
         NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:&jsonError];
-        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v4.json"];
+        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v5.json"];
         BOOL wroteReport = json != nil && [json writeToFile:outputPath options:NSDataWritingAtomic error:&jsonError];
         [self emitResearchDiagnosticEvent:wroteReport
-            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v4.json"
+            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v5.json"
             : [NSString stringWithFormat:@"checkpoint=report.write status=FAIL error=%@", jsonError.localizedDescription ?: @"unknown"]];
 
         dispatch_async(dispatch_get_main_queue(), ^{

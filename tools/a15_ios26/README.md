@@ -42,14 +42,17 @@ python tools/a15_ios26/analyze_titan.py \
 python tools/a15_ios26/build_response_trace.py \
   --titan-report titan-static-report.json \
   --sptm-txm-report sptm-txm-static-report.json \
+  --device-diagnostic a15-ios26-diagnostic-v5.json \
   --json-output response-trace.json \
   --markdown-output response-trace.md
 ```
 
-`build_response_trace.py` combines the existing reports into an ordered,
-provenance-aware diagnostic trace. It deliberately labels runtime SPTM/TXM
-responses as `NOT_REACHED` until direct evidence exists; offline or read-only
-observations are never promoted to hardware responses.
+`build_response_trace.py` combines the existing reports and an optional device
+diagnostic into an ordered, provenance-aware v2 trace. It separates the first
+metadata blocker from the first runtime blocker and deliberately labels the
+protected-component boundary and runtime SPTM/TXM responses as `NOT_REACHED`
+until direct evidence exists. Offline or read-only observations are never
+promoted to hardware responses.
 
 The kernel image may be an Apple fileset kernelcache. The analyzer selects the
 `com.apple.kernel` fileset automatically.

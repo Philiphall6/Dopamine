@@ -123,12 +123,14 @@ def main() -> int:
             f"research diagnostic unexpectedly references {forbidden}",
         )
     for marker in (
-        '@"schema": @"dopamine.a15-ios26.device-diagnostic.v4"',
+        '@"schema": @"dopamine.a15-ios26.device-diagnostic.v5"',
         '@"binary_preflight": binaryPreflight',
         '@"runtime_preflight": runtimePreflight',
         '@"standard_iosurface_preflight": standardIOSurfacePreflight',
         '@"scope": @"mach_task_self/app-owned-page-only"',
         '@"scope": @"standard-private-iosurface-only"',
+        '@"lock_read_only": @YES',
+        '@"lock_avoid_sync": @YES',
         'record(@"runtime.app_owned_vm"',
         'record(@"runtime.standard_iosurface"',
         'vm_allocate(mach_task_self()',
@@ -149,13 +151,22 @@ def main() -> int:
         'record(@"titan.command_buffers", @"BLOCKED"',
         'record(@"titan.physical_write", @"NOT_REACHED"',
         'record(@"sptm_txm.runtime_response", @"NOT_REACHED"',
-        'Documents/a15-ios26-diagnostic-v4.json',
+        'Documents/a15-ios26-diagnostic-v5.json',
         '@"asserts_live_sptm_txm_response": @NO',
     ):
         require(marker in diagnostic_body, f"research diagnostic is missing safety marker: {marker}")
     require(
         diagnostic_body.count("IOSurfaceCreate(") == 1,
         "research diagnostic must create exactly one standard IOSurface",
+    )
+    require(
+        diagnostic_body.count("IOSurfaceLock(") == 1
+        and diagnostic_body.count("IOSurfaceUnlock(") == 1,
+        "research diagnostic must use exactly one bounded IOSurface lock/unlock pair",
+    )
+    require(
+        "kIOSurfaceLockReadOnly | kIOSurfaceLockAvoidSync" in diagnostic_body,
+        "standard IOSurface lock is not explicitly read-only and synchronization-avoiding",
     )
     require(
         "CFRelease(standardSurface)" in diagnostic_body,
@@ -228,11 +239,22 @@ def main() -> int:
         "offline analyzer no longer scopes static RTKit markers away from live state",
     )
     require(
-        '"asserts_live_sptm_txm_response": False' in response_trace
+        '"schema": "dopamine.a15-ios26.response-trace.v2"' in response_trace
+        and '"asserts_live_sptm_txm_response": False' in response_trace
         and '"runtime_values": None' in response_trace
-        and '"runtime_values_status": "NOT_REACHED"' in response_trace,
+        and '"runtime_values_status": "NOT_REACHED"' in response_trace
+        and '"first_metadata_blocker": first_metadata_blocker' in response_trace
+        and '"first_runtime_blocker": first_runtime_blocker' in response_trace
+        and '"protected_component_boundary": "NOT_REACHED"' in response_trace,
         "response trace can no longer distinguish its model from a live SPTM/TXM response",
     )
+    for marker in (
+        '"request_generated": False',
+        '"request_transmitted": False',
+        '"handler_dispatched": False',
+        '"response_received": False',
+    ):
+        require(marker in response_trace, f"response trace is missing boundary marker: {marker}")
     require(
         "txm_kernel_call" in response_trace
         and "txm_enter" in response_trace
@@ -254,7 +276,7 @@ def main() -> int:
 
     print(
         "OK: A15/iOS 26.0.1 remains diagnostic-only; "
-        "standard IOSurface preflight bounded; IORVBAR mapping validated and Titan execution blocked"
+        "read-only IOSurface lifecycle bounded; IORVBAR mapping validated and Titan execution blocked"
     )
     return 0
 

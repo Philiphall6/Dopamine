@@ -439,6 +439,40 @@ remain false. The app-owned 16 KiB VM allocation/deallocation also remains
 `PASS` with no write. Selector, kernel, Titan, and SPTM/TXM states are unchanged:
 `ppl-bypass-missing`, `MISSING`, `BLOCKED`, and `NOT_REACHED`, respectively.
 
+## Phase 5 Read-Only IOSurface Lifecycle and Boundary Trace
+
+Phase 5 extends the ordinary private `16x16` IOSurface checkpoint with exactly
+one `IOSurfaceLock`/`IOSurfaceUnlock` pair using
+`kIOSurfaceLockReadOnly | kIOSurfaceLockAvoidSync`. It records the return codes
+and seed values, then releases the surface. It does not obtain the base address,
+read or write the surface contents, create a Mach port, prefetch pages, request
+a memory region, or call IOKit. The report schema is
+`dopamine.a15-ios26.device-diagnostic.v5`, written to
+`Documents/a15-ios26-diagnostic-v5.json`.
+
+The response-trace builder now accepts an optional bounded device diagnostic.
+Its v2 output separates `selector.ppl_metadata` as the first metadata blocker
+from `kernel.runtime_read_write` as the first runtime blocker. Request
+generation, transmission, handler dispatch, and response receipt are all
+explicitly false, while `protected_component_boundary` remains `NOT_REACHED`.
+This prevents a successful app-owned allocation or IOSurface lifecycle from
+being misreported as a protected-component response.
+
+Two public reverse-engineering notes were used only as architectural comparison:
+
+- `https://proteas.github.io/ios/2023/06/09/some-quick-and-discrete-notes-on-sptm.html`
+  identifies separate SPTM/TXM firmware images, the kernel `__DATA_SPTM`
+  segment, and dispatch-related strings.
+- `https://newosxbook.com/bonus/sptm2.html` describes an iOS 17.1.1 flow in
+  which XNU enters SPTM with `GENTER`, TXM enters with `SVC #0`, and SPTM routes
+  calls through subsystem dispatch tables.
+
+Those observations are not target-version evidence. They do not establish that
+the A15/iOS 26.0.1 request boundary, handler, or return path has been reached.
+The structured comparison is recorded in
+`docs/SPTM_IOS17_IOS26_STATIC_COMPARISON.md`.
+The phase 5 reproducible build and device result are pending.
+
 ## Remaining Hypotheses
 
 - The iOS 26 AGX layout changes represented in the guarded Titan code may be
