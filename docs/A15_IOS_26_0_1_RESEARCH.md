@@ -367,7 +367,25 @@ The reproducible phase 3 build completed successfully on 2026-10-15:
 Post-build inspection confirms the v3 schema and output filename in the main
 executable, the packaged ClearSword and DarkSword frameworks, and Titan's
 unchanged declared support range of iOS `16.1` through `17.3.1`. Device
-observations for this phase are pending.
+observations were collected from the USB-connected target on 2026-10-15. The
+report was pulled as `a15-ios26-diagnostic-v3-device-20261015.json`, with
+SHA-256 `B0368D9FFE288FB3C59F42D08E7C5E26A4BEC689D148BBD65222961A44BEC9EF`.
+
+The bounded runtime and binary observations are:
+
+- The target reports matching `vm_page_size` and `hw.pagesize` values of
+  `16,384` bytes. Allocation and deallocation of one app-owned page both return
+  success, and `memory_written` remains false.
+- ClearSword is a valid ARM64 Mach-O of `93,920` bytes with valid load-command
+  bounds, minimum iOS `15.0.0`, and SDK `26.5.0`.
+- DarkSword is a valid ARM64 Mach-O of `112,464` bytes with valid load-command
+  bounds, minimum iOS `15.0.0`, and SDK `26.5.0`.
+- Both binaries link IOSurface and contain the three expected static marker
+  strings, but neither framework was loaded or invoked by the diagnostic.
+- The selector remains `BLOCKED` at `ppl-bypass-missing`: two kernel metadata
+  candidates, no PPL candidate, no runtime kernel read/write primitive.
+- Titan command buffers remain `BLOCKED`; physical write and SPTM/TXM runtime
+  response remain `NOT_REACHED`.
 
 ## Remaining Hypotheses
 
