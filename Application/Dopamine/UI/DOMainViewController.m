@@ -13,6 +13,7 @@
 #import "DOActionMenuButton.h"
 #import "DOUpdateViewController.h"
 #import "DOLogCrashViewController.h"
+#import <IOSurface/IOSurface.h>
 #import <mach/mach.h>
 #import <mach-o/loader.h>
 #import <os/log.h>
@@ -416,6 +417,49 @@
                [NSString stringWithFormat:@"bytes=%lu allocate=%d deallocate=%d memory-written=false",
                 (unsigned long)appOwnedSize, allocationStatus, deallocationStatus]);
 
+        NSDictionary *standardSurfaceProperties = @{
+            (__bridge NSString *)kIOSurfaceWidth: @16,
+            (__bridge NSString *)kIOSurfaceHeight: @16,
+            (__bridge NSString *)kIOSurfaceBytesPerElement: @4,
+            (__bridge NSString *)kIOSurfaceBytesPerRow: @64,
+            (__bridge NSString *)kIOSurfaceAllocSize: @1024,
+        };
+        IOSurfaceRef standardSurface = IOSurfaceCreate((__bridge CFDictionaryRef)standardSurfaceProperties);
+        BOOL standardSurfaceCreated = standardSurface != NULL;
+        size_t standardSurfaceWidth = 0;
+        size_t standardSurfaceHeight = 0;
+        size_t standardSurfaceBytesPerRow = 0;
+        size_t standardSurfaceAllocSize = 0;
+        BOOL standardSurfaceReleased = NO;
+        if (standardSurface != NULL) {
+            standardSurfaceWidth = IOSurfaceGetWidth(standardSurface);
+            standardSurfaceHeight = IOSurfaceGetHeight(standardSurface);
+            standardSurfaceBytesPerRow = IOSurfaceGetBytesPerRow(standardSurface);
+            standardSurfaceAllocSize = IOSurfaceGetAllocSize(standardSurface);
+            CFRelease(standardSurface);
+            standardSurface = NULL;
+            standardSurfaceReleased = YES;
+        }
+        NSDictionary *standardIOSurfacePreflight = @{
+            @"scope": @"standard-private-iosurface-only",
+            @"created": @(standardSurfaceCreated),
+            @"released": @(standardSurfaceReleased),
+            @"width": @(standardSurfaceWidth),
+            @"height": @(standardSurfaceHeight),
+            @"bytes_per_row": @(standardSurfaceBytesPerRow),
+            @"allocation_size": @(standardSurfaceAllocSize),
+            @"base_address_accessed": @NO,
+            @"mach_port_created": @NO,
+            @"prefetch_called": @NO,
+            @"memory_region_requested": @NO,
+            @"iokit_called": @NO,
+        };
+        record(@"runtime.standard_iosurface", standardSurfaceReleased ? @"PASS" : @"FAIL",
+               [NSString stringWithFormat:@"width=%lu height=%lu row=%lu allocation=%lu released=%@",
+                (unsigned long)standardSurfaceWidth, (unsigned long)standardSurfaceHeight,
+                (unsigned long)standardSurfaceBytesPerRow, (unsigned long)standardSurfaceAllocSize,
+                standardSurfaceReleased ? @"true" : @"false"]);
+
         NSMutableArray<NSDictionary *> *exploitMatrix = [NSMutableArray new];
         NSMutableDictionary<NSString *, NSNumber *> *candidateCounts = [@{@"Kernel": @0, @"PAC": @0, @"PPL": @0} mutableCopy];
         NSMutableDictionary<NSString *, NSNumber *> *availableCounts = [@{@"Kernel": @0, @"PAC": @0, @"PPL": @0} mutableCopy];
@@ -505,7 +549,7 @@
         record(@"sptm_txm.runtime_response", @"NOT_REACHED", @"no-protected-component-request-issued");
 
         NSDictionary *report = @{
-            @"schema": @"dopamine.a15-ios26.device-diagnostic.v3",
+            @"schema": @"dopamine.a15-ios26.device-diagnostic.v4",
             @"diagnostic_only": @YES,
             @"asserts_live_sptm_txm_response": @NO,
             @"target": @{
@@ -517,6 +561,7 @@
             @"txm_static_base": @"0xfffffff017004000",
             @"binary_preflight": binaryPreflight,
             @"runtime_preflight": runtimePreflight,
+            @"standard_iosurface_preflight": standardIOSurfacePreflight,
             @"exploit_matrix": exploitMatrix,
             @"selector_counts": @{
                 @"candidates": candidateCounts,
@@ -527,10 +572,10 @@
 
         NSError *jsonError = nil;
         NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:&jsonError];
-        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v3.json"];
+        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v4.json"];
         BOOL wroteReport = json != nil && [json writeToFile:outputPath options:NSDataWritingAtomic error:&jsonError];
         [self emitResearchDiagnosticEvent:wroteReport
-            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v3.json"
+            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v4.json"
             : [NSString stringWithFormat:@"checkpoint=report.write status=FAIL error=%@", jsonError.localizedDescription ?: @"unknown"]];
 
         dispatch_async(dispatch_get_main_queue(), ^{

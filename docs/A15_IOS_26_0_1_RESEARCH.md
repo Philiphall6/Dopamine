@@ -387,6 +387,35 @@ The bounded runtime and binary observations are:
 - Titan command buffers remain `BLOCKED`; physical write and SPTM/TXM runtime
   response remain `NOT_REACHED`.
 
+## Phase 4 Static Symbol Inventory and Standard IOSurface Preflight
+
+The phase 3 packaged frameworks were inspected offline with
+`tools/a15_ios26/analyze_macho_preflight.py`. The tool parses the Mach-O symbol
+metadata and code-signature bounds directly from bytes; it cannot load or
+execute the target image.
+
+The generated inventories are `clearsword-macho-preflight-v1.json` (SHA-256
+`D10EB05832FA4ABEA3CAE078DEA823EF7F712086FEC6B7423156C478050CD7F2`) and
+`darksword-macho-preflight-v1.json` (SHA-256
+`9B3C8E07A46A3D85CF0D0B337414287F9E4B6E594EA013F94B80B3A843435C1F`).
+
+- ClearSword contains 343 symbols, including 88 imports and 37 exports.
+- DarkSword contains 437 symbols, including 91 imports and 78 exports.
+- Both import three IOSurface functions, Mach VM functions, socket functions,
+  and file read/write functions. DarkSword additionally imports four direct
+  IOKit functions.
+- Both export their exploit entry points and early kernel read/write helpers.
+  This confirms that invoking either entry point would cross directly into the
+  invasive chain; phase 4 therefore does not load either framework.
+
+The phase 4 device diagnostic instead creates one ordinary private `16x16`
+IOSurface with a four-byte element size, reads only its public dimensions and
+allocation size, and immediately releases it. Static guards reject base-address
+access, Mach-port creation, page prefetching, memory-region selection, IOKit,
+socket, exploit, GPU, kernel-write, and SPTM/TXM calls from the diagnostic body.
+The report schema is `dopamine.a15-ios26.device-diagnostic.v4`, written to
+`Documents/a15-ios26-diagnostic-v4.json`. Device observations are pending.
+
 ## Remaining Hypotheses
 
 - The iOS 26 AGX layout changes represented in the guarded Titan code may be

@@ -52,6 +52,7 @@ def main() -> int:
     ).read_text()
     titan_analyzer = (ROOT / "tools/a15_ios26/analyze_titan.py").read_text()
     response_trace = (ROOT / "tools/a15_ios26/build_response_trace.py").read_text()
+    macho_preflight = (ROOT / "tools/a15_ios26/analyze_macho_preflight.py").read_text()
     live_layout = json.loads(
         (ROOT / "tools/a15_ios26/live-layout-iphone14_2-23A355.json").read_text()
     )
@@ -104,8 +105,10 @@ def main() -> int:
         "IOServiceOpen",
         "IOConnectCall",
         "accessibleKernelPath",
-        "IOSurfaceCreate(",
         "IOSurfacePrefetchPages(",
+        "IOSurfaceGetBaseAddress(",
+        "IOSurfaceCreateMachPort(",
+        "kIOSurfaceMemoryRegion",
         "mach_make_memory_entry_64(",
         "mach_vm_map(",
         "vm_write(",
@@ -120,14 +123,22 @@ def main() -> int:
             f"research diagnostic unexpectedly references {forbidden}",
         )
     for marker in (
-        '@"schema": @"dopamine.a15-ios26.device-diagnostic.v3"',
+        '@"schema": @"dopamine.a15-ios26.device-diagnostic.v4"',
         '@"binary_preflight": binaryPreflight',
         '@"runtime_preflight": runtimePreflight',
+        '@"standard_iosurface_preflight": standardIOSurfacePreflight',
         '@"scope": @"mach_task_self/app-owned-page-only"',
+        '@"scope": @"standard-private-iosurface-only"',
         'record(@"runtime.app_owned_vm"',
+        'record(@"runtime.standard_iosurface"',
         'vm_allocate(mach_task_self()',
         'vm_deallocate(mach_task_self()',
         '@"memory_written": @NO',
+        '@"base_address_accessed": @NO',
+        '@"mach_port_created": @NO',
+        '@"prefetch_called": @NO',
+        '@"memory_region_requested": @NO',
+        '@"iokit_called": @NO',
         '@"exploit_matrix": exploitMatrix',
         'record(@"selector.kernel"',
         'record(@"selector.pac"',
@@ -138,10 +149,18 @@ def main() -> int:
         'record(@"titan.command_buffers", @"BLOCKED"',
         'record(@"titan.physical_write", @"NOT_REACHED"',
         'record(@"sptm_txm.runtime_response", @"NOT_REACHED"',
-        'Documents/a15-ios26-diagnostic-v3.json',
+        'Documents/a15-ios26-diagnostic-v4.json',
         '@"asserts_live_sptm_txm_response": @NO',
     ):
         require(marker in diagnostic_body, f"research diagnostic is missing safety marker: {marker}")
+    require(
+        diagnostic_body.count("IOSurfaceCreate(") == 1,
+        "research diagnostic must create exactly one standard IOSurface",
+    )
+    require(
+        "CFRelease(standardSurface)" in diagnostic_body,
+        "standard IOSurface is not released",
+    )
     require(
         "MAPPING_VALIDATED_TITAN_EXECUTION_BLOCKED" in report,
         "report does not record the current diagnostic blocker",
@@ -221,10 +240,21 @@ def main() -> int:
         and "num_return_words" in response_trace,
         "response trace is missing the published TXM call contract",
     )
+    for marker in (
+        '"dopamine.a15-ios26.macho-preflight.v1"',
+        "path.read_bytes()",
+        '"execution": "NOT_PERFORMED"',
+        "LC_SYMTAB",
+        "LC_DYSYMTAB",
+        "LC_CODE_SIGNATURE",
+    ):
+        require(marker in macho_preflight, f"Mach-O preflight is missing marker: {marker}")
+    for forbidden in ("ctypes", "subprocess", "os.system", "Popen(", "CDLL(", "exec(", "eval("):
+        require(forbidden not in macho_preflight, f"Mach-O preflight can execute target code via {forbidden}")
 
     print(
         "OK: A15/iOS 26.0.1 remains diagnostic-only; "
-        "app-owned memory preflight added; IORVBAR mapping validated and Titan execution blocked"
+        "standard IOSurface preflight bounded; IORVBAR mapping validated and Titan execution blocked"
     )
     return 0
 
