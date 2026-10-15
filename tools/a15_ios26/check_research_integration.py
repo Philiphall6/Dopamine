@@ -365,6 +365,7 @@ def main() -> int:
         "wrapper_vtable != gTitanContext.iomachport_vtable",
         "if (!(state_word & 0x80000000U))",
         "titan.ipc-census CANDIDATE",
+        "titan.ipc-census DECODE revision=ipc-census-v2",
         "titan.ipc-census TYPE",
         "titan.ipc-census SUMMARY",
         "allocation=0x%x entries=%u entry-size=0x%x tail=0x%x",
@@ -374,6 +375,15 @@ def main() -> int:
         "titan.ipc-layout STOP read-only words-only; no IPC object followed",
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
+    require(
+        "revision=ipc-census-v2" in jailbreaker,
+        "active probe entry does not identify the IPC census v2 build",
+    )
+    require(
+        "INFO: iOS 26 IOMemoryMap primary candidate" in kernel_patchfinder
+        and "trying the accessor pattern" in kernel_patchfinder,
+        "iOS 26 IOMemoryMap fallback is not identified as an expected retry",
+    )
     layout_start = ipc_port.find("static void titan_log_layout_window")
     layout_end = ipc_port.find("static int create_new_send_once_port", layout_start)
     require(layout_start >= 0 and layout_end > layout_start, "IPC layout probe body is missing")
