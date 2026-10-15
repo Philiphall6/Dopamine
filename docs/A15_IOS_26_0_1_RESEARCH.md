@@ -354,7 +354,20 @@ The next device diagnostic advances one bounded step beyond metadata selection:
 The phase remains diagnostic-only. It does not create an IOSurface, request a
 PurpleGfxMem mapping, call either exploit, create sockets, issue GPU work, or
 access SPTM/TXM. The integration checker explicitly rejects those calls from
-the diagnostic body. Device observations for this phase are pending.
+the diagnostic body.
+
+The reproducible phase 3 build completed successfully on 2026-10-15:
+
+- Source commit: `1faefa50ff2f6507833806da1a217a449d28d4dc`
+- GitHub Actions run: `38693388683` (successful in 11m 9s)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-v3-1faefa5.ipa`
+- Size: `55,447,669` bytes
+- SHA-256: `88A20F9CD764492BD3D8C6528A9AC01F3953B6C46E5D52F346F25DC925ABC790`
+
+Post-build inspection confirms the v3 schema and output filename in the main
+executable, the packaged ClearSword and DarkSword frameworks, and Titan's
+unchanged declared support range of iOS `16.1` through `17.3.1`. Device
+observations for this phase are pending.
 
 ## Remaining Hypotheses
 
