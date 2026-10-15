@@ -542,7 +542,22 @@ Post-build inspection confirms the v6 schema and filename, the dry-run mode,
 the first-proven-blocker and earliest-unexecuted-stage fields, and the explicit
 no-load/no-entrypoint/no-protected-request evidence in the main executable.
 Titan's packaged support range remains iOS `16.1` through `17.3.1`; no target
-support metadata was widened. The phase 6 on-device result is pending.
+support metadata was widened.
+
+The phase 6 diagnostic completed on the USB-connected target on 2026-10-15.
+The report was pulled as `a15-ios26-diagnostic-v6-device-20261015.json`, with
+SHA-256
+`B964E66048DDA2B7B2A741AABBF58A3F08C00054CA2B8A022452AFD2D07928C9`.
+The real metadata selector chooses `ClearSword (default)` for the kernel,
+requires no PAC bypass, and finds no selectable PPL/SPTM bypass. The first
+proven blocker is therefore `selector.ppl_metadata`.
+
+`gatherSystemInformation` remains the earliest unexecuted stage because the
+three static inputs were not present in the app container and the diagnostic
+does not trigger downloads or XPF. Framework loading, exploit entry points,
+kernel primitives, physRW, privilege changes, bootstrap changes, and protected
+requests are all recorded as false. Rebuilding response trace v2 produces the
+same hashes as phases 4 and 5 because no protected boundary state changed.
 
 ## Remaining Hypotheses
 
