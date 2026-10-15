@@ -530,7 +530,19 @@ exploit entry points, kernel primitives, physRW, privilege changes, bootstrap
 changes, and protected requests. This test can identify the first proven
 selection blocker without claiming that a jailbreak attempt occurred.
 
-The reproducible phase 6 build and on-device result are pending.
+The reproducible phase 6 build completed successfully on 2026-10-15:
+
+- Source commit: `5d084b4376ae127b301e54946c4a752300ad22e4`
+- GitHub Actions run: `38704278559` (successful in 6m 37s)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-v6-5d084b4.ipa`
+- Size: `55,451,968` bytes
+- SHA-256: `B7247DEC04706CEBB66338E0AB8906FB25C5B4D7DC8FAEF1DC6D6FFD652731EB`
+
+Post-build inspection confirms the v6 schema and filename, the dry-run mode,
+the first-proven-blocker and earliest-unexecuted-stage fields, and the explicit
+no-load/no-entrypoint/no-protected-request evidence in the main executable.
+Titan's packaged support range remains iOS `16.1` through `17.3.1`; no target
+support metadata was widened. The phase 6 on-device result is pending.
 
 ## Remaining Hypotheses
 
