@@ -12,22 +12,23 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_EXACT_READ_FIX_READY`
+- Research state: `ACTIVE_TITAN_PROBE_EXACT_READ_FIX_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `e702adc`
-- GitHub Actions run: `38727550502` (`PASS`, 10m 01s)
-- IPA: `Dopamine-A15-iOS26-iorvbar-read-window-e702adc.ipa`
-- Size: `55,465,845` bytes
-- SHA-256: `613E70196EB95BBC17E698674EBED5EAD453619BD5589F4604B611DAB1847419`
+- Source commit: `1673566`
+- GitHub Actions run: `38730539055` (`PASS`, 12m 06s)
+- IPA: `Dopamine-A15-iOS26-exact-read-1673566.ipa`
+- Size: `55,466,517` bytes
+- SHA-256: `18A0A8A192B3B1F7377FB68137D81C7D06FD5AC5E8FBD3AC07F613691861ACAE`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` are present.
 
-This build was run on the exact target on 2026-10-15. It passed the original
-`IOMachPort` tail-field read and exposed the next fixed-width read failure in a
-16-byte `OSArray` backing allocation.
+The packaged ClearSword binary exports `clearsword_kreadbuf_exact` at image
+offset `0x4810`. The packaged Titan binary contains the exact-read symbol name,
+failure markers, and successful eight-byte-read marker. This build has not yet
+been run on the target.
 
 ## First Active Device Result
 
@@ -74,7 +75,7 @@ as the read of the second `IODeviceMemory` OSArray element at `elements+0x8`.
 This is still before IORVBAR MMIO access, GFX ROP submission, and every SPTM/TXM
 request.
 
-The next probe adds a separate exported ClearSword exact-read helper,
+The new build adds a separate exported ClearSword exact-read helper,
 `clearsword_kreadbuf_exact`. It passes an eight-byte `optlen` to
 `getsockopt(ICMP6_FILTER)` and refuses to fall back to
 the 32-byte primitive when that helper is expected but unavailable. Apple's XNU
@@ -94,8 +95,8 @@ change remains read-only.
 | Existing GFX IORVBAR mapping | **ACTIVE ADAPTATION** | The 8-byte `IOMemoryMap` is rediscovered and revalidated at runtime; no per-boot address is embedded |
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
-| Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER READY** | ClearSword validated the live kernel header; the new ICMPv6 adapter requests eight bytes for small zone allocations |
-| Titan unrestricted physical write | **NOT REACHED / EXACT READ FIX READY** | Second run passed IOMachPort, then panicked on the 16-byte OSArray backing store before GFX patchfinding or ROP submission |
+| Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER BUILT** | ClearSword validated the live kernel header; the new ICMPv6 adapter requests eight bytes for small zone allocations |
+| Titan unrestricted physical write | **NOT REACHED / EXACT READ FIX BUILT** | Second run passed IOMachPort, then panicked on the 16-byte OSArray backing store before GFX patchfinding or ROP submission |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
@@ -822,7 +823,7 @@ Consequences:
 
 ## Next Steps
 
-1. Build and install the ClearSword exact-read adapter.
+1. Install the ClearSword exact-read build.
 2. Run that active probe once and recover
    `Documents/a15-ios26-active-probe.jsonl` after completion, process exit, or
    reboot.
