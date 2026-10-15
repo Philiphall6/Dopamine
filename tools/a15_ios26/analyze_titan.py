@@ -984,6 +984,462 @@ def classify_pacga_chain(following: list[dict]) -> str:
     return "unclassified"
 
 
+def parse_immediate_operand(value: str) -> int | None:
+    """Parse one Capstone immediate operand without accepting expressions."""
+    value = value.strip().removeprefix("#")
+    try:
+        return int(value, 0)
+    except ValueError:
+        return None
+
+
+def parse_shifted_immediate_operands(parts: list[str]) -> int | None:
+    if not parts:
+        return None
+    value = parse_immediate_operand(parts[0])
+    if value is None:
+        return None
+    if len(parts) == 1:
+        return value
+    shift = parts[1].strip().lower().split()
+    if len(shift) != 2 or shift[0] != "lsl":
+        return None
+    amount = parse_immediate_operand(shift[1])
+    return None if amount is None else value << amount
+
+
+def direct_branch_target(instruction: dict) -> int | None:
+    if instruction["mnemonic"] not in {"b", "bl"}:
+        return None
+    return parse_immediate_operand(instruction["op_str"])
+
+
+def conditional_branch_target(instruction: dict) -> int | None:
+    mnemonic = instruction["mnemonic"]
+    if not (
+        mnemonic.startswith("b.")
+        or mnemonic in {"cbz", "cbnz", "tbz", "tbnz"}
+    ):
+        return None
+    return parse_immediate_operand(instruction["op_str"].split(",")[-1])
+
+
+def reconstruct_w_immediate_return(
+    instructions: list[dict], address: int, register: str = "w0"
+) -> int | None:
+    start = next(
+        (
+            index
+            for index, item in enumerate(instructions)
+            if item["address"] == address
+        ),
+        None,
+    )
+    if start is None:
+        return None
+    value = None
+    for item in instructions[start : start + 4]:
+        parts = [part.strip() for part in item["op_str"].split(",")]
+        if item["mnemonic"] == "ret":
+            return value
+        if len(parts) < 2 or parts[0] != register:
+            continue
+        immediate = parse_immediate_operand(parts[1])
+        if immediate is None:
+            continue
+        if item["mnemonic"] == "mov":
+            value = immediate & 0xFFFFFFFF
+        elif item["mnemonic"] == "movk" and value is not None:
+            shift = 0
+            if len(parts) >= 3:
+                shift_parts = parts[2].lower().split()
+                if len(shift_parts) != 2 or shift_parts[0] != "lsl":
+                    continue
+                parsed_shift = parse_immediate_operand(shift_parts[1])
+                if parsed_shift is None:
+                    continue
+                shift = parsed_shift
+            mask = (0xFFFF << shift) & 0xFFFFFFFF
+            value = (value & ~mask) | ((immediate & 0xFFFF) << shift)
+    return value
+
+
+def instructions_for_symbol(
+    image: MappedImage,
+    instructions: list[dict],
+    name: str,
+    *,
+    maximum_size: int = 0x300,
+) -> list[dict]:
+    address = image.symbols.get(name)
+    if address is None:
+        return []
+    text = image.segment("__TEXT")
+    if not text.vmaddr <= address < text.end:
+        return []
+
+    later_symbols = [
+        value
+        for value in image.symbols.values()
+        if address < value < text.end
+    ]
+    end = min(later_symbols, default=address + maximum_size)
+    end = min(end, address + maximum_size)
+    return [item for item in instructions if address <= item["address"] < end]
+
+
+def symbol_at(image: MappedImage, address: int | None) -> str | None:
+    if address is None:
+        return None
+    names = sorted(name for name, value in image.symbols.items() if value == address)
+    return names[0] if names else None
+
+
+def classify_linear_range_guard(instructions: list[dict]) -> dict:
+    """Describe a bounded add/range validator without assigning policy ownership."""
+    mnemonics = [item["mnemonic"] for item in instructions]
+    operands = [item["op_str"].lower() for item in instructions]
+    has_overflow_check = any(
+        mnemonic == "adds" for mnemonic in mnemonics
+    ) and any(mnemonic in {"b.hs", "b.lo"} for mnemonic in mnemonics)
+    has_upper_bound_check = (
+        sum(mnemonic in {"cmp", "ccmp"} for mnemonic in mnemonics) >= 2
+    )
+    has_high_address_limit = any(
+        mnemonic == "lsr" and "#0x1c" in operand
+        for mnemonic, operand in zip(mnemonics, operands, strict=True)
+    )
+    has_error_status = any(
+        mnemonic == "movk" and "#0x8003" in operand
+        for mnemonic, operand in zip(mnemonics, operands, strict=True)
+    )
+    return {
+        "overflow_check": has_overflow_check,
+        "upper_bound_checks": has_upper_bound_check,
+        "high_address_limit": has_high_address_limit,
+        "error_status": has_error_status,
+        "status": (
+            "RANGE_GUARD_CANDIDATE"
+            if has_overflow_check and has_upper_bound_check and has_error_status
+            else "NOT_CLASSIFIED"
+        ),
+    }
+
+
+def analyze_gxf_entry_routes(
+    image: MappedImage,
+    instructions: list[dict],
+) -> dict:
+    body = instructions_for_symbol(
+        image,
+        instructions,
+        "__rtk_mmu_gxf_dispatcher_entry",
+        maximum_size=0x40,
+    )
+    if not body:
+        return {"status": "NOT_PRESENT", "routes": []}
+
+    by_address = {item["address"]: index for index, item in enumerate(instructions)}
+    routes = []
+    selectors = [item for item in body if item["mnemonic"] in {"tbz", "tbnz"}]
+    for selector in selectors:
+        parts = [part.strip() for part in selector["op_str"].split(",")]
+        if len(parts) != 3:
+            continue
+        bit = parse_immediate_operand(parts[1])
+        destination = parse_immediate_operand(parts[2])
+        index = by_address.get(destination)
+        target = None
+        if index is not None:
+            for candidate in instructions[index : index + 4]:
+                target = direct_branch_target(candidate)
+                if candidate["mnemonic"] == "bl" and target is not None:
+                    break
+                target = None
+        routes.append(
+            {
+                "priority": len(routes),
+                "selector": parts[0],
+                "bit": bit,
+                "condition": selector["mnemonic"],
+                "destination": destination,
+                "target": target,
+                "target_symbol": symbol_at(image, target),
+            }
+        )
+
+    if not routes:
+        for item in body:
+            target = direct_branch_target(item)
+            if item["mnemonic"] == "bl" and target is not None:
+                routes.append(
+                    {
+                        "priority": 0,
+                        "selector": None,
+                        "bit": None,
+                        "condition": "direct",
+                        "destination": item["address"],
+                        "target": target,
+                        "target_symbol": symbol_at(image, target),
+                    }
+                )
+                break
+
+    return {
+        "status": "PASS" if routes else "UNRESOLVED",
+        "address": image.symbols["__rtk_mmu_gxf_dispatcher_entry"],
+        "routes": routes,
+        "selection_order": (
+            "first_matching_branch_in_instruction_order"
+            if selectors
+            else "direct_call"
+        ),
+    }
+
+
+def analyze_uppl_dispatcher(
+    image: MappedImage,
+    instructions: list[dict],
+) -> dict:
+    body = instructions_for_symbol(
+        image,
+        instructions,
+        "__rtk_uppl_client_dispatcher",
+        maximum_size=0x80,
+    )
+    if not body:
+        return {"status": "NOT_PRESENT"}
+
+    global_address = None
+    for first, second in zip(body, body[1:]):
+        if first["mnemonic"] != "adrp" or second["mnemonic"] != "add":
+            continue
+        adrp_parts = [part.strip() for part in first["op_str"].split(",")]
+        add_parts = [part.strip() for part in second["op_str"].split(",")]
+        if (
+            len(adrp_parts) == 2
+            and len(add_parts) == 3
+            and add_parts[0] == adrp_parts[0] == add_parts[1]
+        ):
+            page = parse_immediate_operand(adrp_parts[1])
+            offset = parse_immediate_operand(add_parts[2])
+            if page is not None and offset is not None:
+                global_address = (page + offset) & UINT64_MASK
+                break
+
+    static_count = read_u64_or_none(image, global_address) if global_address else None
+    static_table = (
+        read_u64_or_none(image, global_address + 8) if global_address else None
+    )
+    authenticated_branch = next(
+        (item for item in body if item["mnemonic"].startswith("bra")),
+        None,
+    )
+    table_status = (
+        "RUNTIME_POPULATED"
+        if static_count == 0 and static_table == 0
+        else "STATIC_VALUES_PRESENT"
+    )
+    bounds_branch = next(
+        (item for item in body if item["mnemonic"] == "b.ls"),
+        None,
+    )
+    null_branch = next(
+        (item for item in body if item["mnemonic"] == "cbz"),
+        None,
+    )
+    return {
+        "status": "PASS",
+        "address": image.symbols["__rtk_uppl_client_dispatcher"],
+        "dispatch_state": global_address,
+        "static_handler_count": static_count,
+        "static_handler_table": static_table,
+        "table_status": table_status,
+        "packet_size_minimum": 0x28,
+        "packet_fields": [
+            {"offset": 0, "size": 4, "role": "handler_index"},
+            {"offset": 8, "size": 8, "role": "argument_x0"},
+            {"offset": 0x10, "size": 8, "role": "argument_x1"},
+            {"offset": 0x18, "size": 8, "role": "argument_x2"},
+            {"offset": 0x20, "size": 8, "role": "argument_x3"},
+        ],
+        "bounds_check": any(item["mnemonic"] == "b.ls" for item in body),
+        "null_handler_check": any(item["mnemonic"] == "cbz" for item in body),
+        "error_returns": {
+            "index_out_of_bounds": reconstruct_w_immediate_return(
+                body,
+                conditional_branch_target(bounds_branch) if bounds_branch else -1,
+            ),
+            "null_handler": reconstruct_w_immediate_return(
+                body,
+                conditional_branch_target(null_branch) if null_branch else -1,
+            ),
+        },
+        "authenticated_branch": (
+            instruction_text(authenticated_branch) if authenticated_branch else None
+        ),
+        "limitations": (
+            "The packaged image contains zero count/table values, so handler indices "
+            "cannot be assigned statically from this payload."
+        ),
+    }
+
+
+def analyze_mmu_mapping_contract(
+    image: MappedImage,
+    instructions: list[dict],
+) -> dict:
+    helper_name = "_mmu_get_tt_info"
+    helper_address = image.symbols.get(helper_name)
+    handlers = {}
+    for name in ("__rtk_mmu_map", "__rtk_mmu_unmap", "__rtk_mmu_update_mapping"):
+        body = instructions_for_symbol(image, instructions, name, maximum_size=0x120)
+        if not body:
+            continue
+        calls = []
+        for item in body:
+            target = direct_branch_target(item)
+            if item["mnemonic"] == "bl" and target is not None:
+                calls.append(
+                    {
+                        "address": item["address"],
+                        "target": target,
+                        "target_symbol": symbol_at(image, target),
+                    }
+                )
+        handlers[name] = {
+            "address": image.symbols[name],
+            "calls": calls,
+            "translation_range_guard": any(
+                call["target"] == helper_address for call in calls
+            ),
+            "separate_physical_ingress_guard": False,
+        }
+
+    dispatcher = instructions_for_symbol(
+        image,
+        instructions,
+        "__rtk_mmu_gxf_dispatcher",
+        maximum_size=0x280,
+    )
+    unnamed_guards = []
+    known_symbols = set(image.symbols.values())
+    for item in dispatcher:
+        target = direct_branch_target(item)
+        if item["mnemonic"] != "bl" or target is None or target in known_symbols:
+            continue
+        start = next(
+            (index for index, candidate in enumerate(instructions) if candidate["address"] == target),
+            None,
+        )
+        if start is None:
+            continue
+        candidate = instructions[start : start + 96]
+        classification = classify_linear_range_guard(candidate)
+        if classification["status"] == "RANGE_GUARD_CANDIDATE":
+            unnamed_guards.append(
+                {
+                    "call_site": item["address"],
+                    "target": target,
+                    **classification,
+                }
+            )
+
+    command_ids = sorted(
+        {
+            immediate
+            for item in dispatcher
+            if item["mnemonic"] == "cmp"
+            for parts in [[part.strip() for part in item["op_str"].split(",")]]
+            if len(parts) == 2 and parts[0] in {"w21", "w22"}
+            for immediate in [parse_immediate_operand(parts[1])]
+            if immediate is not None
+        }
+    )
+    update_body = instructions_for_symbol(
+        image,
+        instructions,
+        "__rtk_mmu_update_mapping",
+        maximum_size=0x180,
+    )
+    attribute_classes = {0}
+    for item in update_body:
+        if item["mnemonic"] != "cmp":
+            continue
+        parts = [part.strip() for part in item["op_str"].split(",")]
+        if len(parts) < 2 or parts[0] != "w9":
+            continue
+        value = parse_shifted_immediate_operands(parts[1:])
+        if value is not None:
+            attribute_classes.add(value)
+
+    switch_body = instructions_for_symbol(
+        image,
+        instructions,
+        "__rtk_mmu_switch_region_base_by_contextID",
+        maximum_size=0x180,
+    )
+    context_state_guard = next(
+        (
+            item
+            for item in switch_body
+            if item["mnemonic"] == "ldrb" and "#0x638" in item["op_str"].lower()
+        ),
+        None,
+    )
+    authorization_flag = next(
+        (
+            item
+            for item in switch_body
+            if item["mnemonic"] in {"tbz", "tbnz"}
+            and item["op_str"].lower().startswith("w22, #0,")
+        ),
+        None,
+    )
+    has_uppl = "__rtk_uppl_client_dispatcher" in image.symbols
+    return {
+        "status": "PASS" if handlers else "NOT_PRESENT",
+        "handlers": handlers,
+        "direct_gxf": {
+            "address": image.symbols.get("__rtk_mmu_gxf_dispatcher"),
+            "command_ids": command_ids,
+            "range_guards": unnamed_guards,
+            "separate_ingress_guard_observed": bool(unnamed_guards),
+        },
+        "attribute_classes": sorted(attribute_classes),
+        "context_switch_guard": {
+            "state_byte_offset": 0x638 if context_state_guard else None,
+            "authorization_argument": "x2" if authorization_flag else None,
+            "authorization_bit": 0 if authorization_flag else None,
+            "observed": bool(context_state_guard and authorization_flag),
+        },
+        "authorization_boundary": (
+            "UPPL_RUNTIME_TABLE_PRODUCER"
+            if has_uppl
+            else "DIRECT_GXF_DISPATCHER"
+        ),
+        "interpretation": (
+            "The mapping handlers validate translation-region bounds through "
+            "_mmu_get_tt_info. A separate range guard is visible at direct GXF "
+            "ingress, not inside __rtk_mmu_map; on UPPL builds the runtime table "
+            "producer must therefore preserve any additional page-authorization policy."
+        ),
+        "limitations": (
+            "Static call-graph evidence only. It does not identify the runtime UPPL "
+            "handler table, prove physical-page ownership, or establish a bypass."
+        ),
+    }
+
+
+def analyze_gfx_mmu_dispatch(image: MappedImage) -> dict:
+    instructions = disassemble_gfx_text(image)
+    return {
+        "entry": analyze_gxf_entry_routes(image, instructions),
+        "uppl": analyze_uppl_dispatcher(image, instructions),
+        "mapping": analyze_mmu_mapping_contract(image, instructions),
+    }
+
+
 def analyze_gfx_security_controls(image: MappedImage) -> dict:
     """Inventory TTBR writes and authenticated saved-state controls.
 
@@ -1116,6 +1572,7 @@ def analyze_gfx(path: pathlib.Path) -> dict:
                 "ios26_hibernate_candidate": ios26_candidate,
                 "rtkit_marker_scope": analyze_static_rtkit_marker(image),
                 "security_controls": analyze_gfx_security_controls(image),
+                "mmu_dispatch_contract": analyze_gfx_mmu_dispatch(image),
                 "ios26_symbol_candidates": {
                     name: image.symbols[name]
                     for name in (

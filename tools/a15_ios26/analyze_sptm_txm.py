@@ -1062,8 +1062,76 @@ def _find_indexed_descriptor_table(
     return None
 
 
+def _collect_iommu_endpoint_anchors(image: MachOImage) -> dict[int, list[str]]:
+    anchors: dict[int, set[str]] = {}
+    for entry in image.referenced_strings(
+        r"^(?:sptm_)?(?:uat|sart|nvme|t8110dart)_"
+    ):
+        for reference in entry["references"]:
+            function = image.function_start(reference["address"])
+            if function is not None:
+                anchors.setdefault(function, set()).add(entry["value"])
+    return {
+        function: sorted(values)
+        for function, values in sorted(anchors.items())
+    }
+
+
+def _summarize_iommu_endpoint_table(
+    image: MachOImage,
+    address: int,
+    endpoint_anchors: dict[int, list[str]] | None = None,
+    max_entries: int = 64,
+) -> dict:
+    entries = []
+    terminated = False
+    for index in range(max_entries):
+        entry_address = address + index * 0x10
+        raw_handler = image.read_u64(entry_address)
+        metadata = image.read_u64(entry_address + 8)
+        if raw_handler is None:
+            break
+        if raw_handler == 0:
+            terminated = metadata in {None, 0}
+            break
+        handler = image.resolve_chained_pointer(raw_handler)
+        anchors = (
+            (endpoint_anchors or {}).get(handler, [])
+            if handler is not None
+            else []
+        )
+        entries.append(
+            {
+                "index": index,
+                "entry_address": entry_address,
+                "raw_handler": raw_handler,
+                "handler": handler,
+                "metadata": metadata,
+                "pointer_encoding": (
+                    "authenticated_chained"
+                    if handler is not None and raw_handler >> 32 != 0
+                    else "plain_or_unresolved"
+                ),
+                "anchors": anchors,
+                "primary_anchors": [
+                    value for value in anchors if value.startswith("sptm_")
+                ],
+            }
+        )
+    return {
+        "address": address,
+        "entry_stride": 0x10,
+        "entry_count": len(entries),
+        "terminated_by_null_entry": terminated,
+        "entries": entries,
+    }
+
+
 def _summarize_iommu_descriptor(
-    image: MachOImage, address: int, permission_masks: Sequence[int]
+    image: MachOImage,
+    address: int,
+    permission_masks: Sequence[int],
+    endpoint_anchors: dict[int, list[str]] | None = None,
 ) -> dict | None:
     values = [image.read_u64(address + offset) for offset in range(0, 0x60, 8)]
     if not values or values[0] is None:
@@ -1102,6 +1170,9 @@ def _summarize_iommu_descriptor(
                 "table_id": table_id,
                 "permission_mask": permission_masks[0],
                 "endpoint_table": first_endpoint,
+                "endpoint_summary": _summarize_iommu_endpoint_table(
+                    image, first_endpoint, endpoint_anchors
+                ),
             }
         )
     if second_endpoint is not None and len(permission_masks) >= 2:
@@ -1110,6 +1181,9 @@ def _summarize_iommu_descriptor(
                 "table_id": table_id + 1,
                 "permission_mask": permission_masks[1],
                 "endpoint_table": second_endpoint,
+                "endpoint_summary": _summarize_iommu_endpoint_table(
+                    image, second_endpoint, endpoint_anchors
+                ),
             }
         )
     return {
@@ -1125,6 +1199,7 @@ def _summarize_iommu_descriptor(
 
 
 def _collect_iommu_registration_topology(image: MachOImage) -> dict:
+    endpoint_anchors = _collect_iommu_endpoint_anchors(image)
     wrapper_anchors = image.referenced_strings(
         r"^register_sptm_iommu_dispatch_table$"
     )
@@ -1181,7 +1256,10 @@ def _collect_iommu_registration_topology(image: MachOImage) -> dict:
                 if descriptor_address is None:
                     continue
                 descriptor = _summarize_iommu_descriptor(
-                    image, descriptor_address, permission_masks
+                    image,
+                    descriptor_address,
+                    permission_masks,
+                    endpoint_anchors,
                 )
                 if descriptor is not None:
                     descriptors.append(
@@ -1225,7 +1303,10 @@ def _collect_iommu_registration_topology(image: MachOImage) -> dict:
             if descriptor_address is None or index is None:
                 continue
             descriptor = _summarize_iommu_descriptor(
-                image, descriptor_address, permission_masks
+                image,
+                descriptor_address,
+                permission_masks,
+                endpoint_anchors,
             )
             if descriptor is not None:
                 descriptors.append(
@@ -2300,6 +2381,30 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
             f"`{descriptor['registry_index']}`: "
             + (registrations or "no mapped endpoint table")
         )
+        for registration in descriptor["registrations"]:
+            summary = registration.get("endpoint_summary", {})
+            lines.append(
+                f"  Endpoint table `{_format_address(registration['endpoint_table'])}`: "
+                f"{summary.get('entry_count', 0)} entries, stride "
+                f"`0x{summary.get('entry_stride', 0):x}`, null-terminated "
+                f"`{summary.get('terminated_by_null_entry', False)}`"
+            )
+            for endpoint in summary.get("entries", []):
+                primary = endpoint.get("primary_anchors", [])
+                related = endpoint.get("anchors", [])
+                anchors = ", ".join(f"`{value}`" for value in primary)
+                if not anchors:
+                    anchors = "no `sptm_*` anchor"
+                    if related:
+                        anchors += "; related: " + ", ".join(
+                            f"`{value}`" for value in related[:3]
+                        )
+                lines.append(
+                    f"  - index `{endpoint['index']}` -> "
+                    f"`{_format_address(endpoint.get('handler'))}` "
+                    f"({endpoint['pointer_encoding']}, metadata "
+                    f"`0x{(endpoint.get('metadata') or 0):x}`): {anchors}"
+                )
 
     for anchor, entries in sptm["anchors"].items():
         if not entries:

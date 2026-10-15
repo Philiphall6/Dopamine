@@ -15,6 +15,12 @@ bootstrap.
 - Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_V2_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
+The durable offline-analysis handoff is
+`docs/A15_IOS26_WORKLOG.md`. The latest static pass resolves GFX's new UPPL
+consumer separately from SPTM's registered UAT endpoint table and records the
+symmetrical 21B91/23A355 endpoint expansion without claiming a bridge between
+the two tables.
+
 ## Latest Build Evidence
 
 - Source commit: `808d9c5b8598ca39ebd2e720c5ae8a09c9e0ef8e`
@@ -322,6 +328,16 @@ dispatcher reachability, context-ID authorization, and micro-PPL validation
 remain unproven. `compare_gfx_security.py` applies an identical TTBR/PACGA/ERET
 census to historical GFX payloads so the 17.4 and 18.1 hardening boundaries can
 be measured symmetrically.
+
+The latest offline pass reconstructs the new 23A355 GXF/UPPL split, its
+indexed four-argument `BRAAZ` dispatch contract, and the zeroed packaged
+dispatch state that must be populated at runtime. It also records the new
+`0x8000 -> 0x419` attribute class and the `+0x638` / `x2[0]` context-switch
+guard. The resulting authorization question is now specific: identify the
+runtime UPPL table producer and the page-ownership policy it applies before a
+mapping handler is published or invoked. See
+[A15 / iOS 26.0.1 Research Worklog](A15_IOS26_WORKLOG.md) for the durable
+checkpoint and exact next task.
 
 ## Diagnostic Response Logging
 

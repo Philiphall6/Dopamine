@@ -363,6 +363,27 @@ separate wrapper; its fields move to `+0x30/+0x38/+0x40`. This is a layout and
 ownership migration, not a change in the observed dispatch permission
 contract.
 
+## Symmetric analyzer v10 endpoint expansion
+
+The v10 reports decode each descriptor's null-terminated endpoint table. UAT
+keeps table ID `7` and permission mask `0x2`, but grows from 7 handlers on
+21B91 to 13 on 23A355. Across all decoded IOMMU tables, counts change from
+`2/3/7/9/1` to `3/9/13/17/4` for SART, NVMe, UAT, t8110dart ID 3, and
+t8110dart ID 4 respectively.
+
+The additional UAT entries expose a more explicit stateful lifecycle:
+destroy-state, unmap-table, map/unmap continuation, prepare-unmap continuation,
+and remove-context operations. One endpoint on each build lacks an exact
+`sptm_*` anchor and remains unnamed. No endpoint is assigned by table order
+alone.
+
+| v10 artifact | SHA-256 |
+|---|---|
+| `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v10.md` | `5D6DADB165E0B4B7AF39B77BCEBC05B41193F28478BF14673986BCCA793005D4` |
+| `sptm-txm-static-report-v10.json` | `498757C670945373111A06727843CF73E785D985C924D165101400C09A90BBBE` |
+| `sptm-txm-static-report-v10.md` | `80E58C6FFB4CAA83A8B427FA07F4A94B2304B2391F9BB5EF7DF42805458E4AEE` |
+
 | v9 artifact | SHA-256 |
 | --- | --- |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v9.json` | `54D8968B498A2B4D11793D4D132315DB7910628EDE024D9F87E167D747D5D7A5` |

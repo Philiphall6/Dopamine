@@ -503,6 +503,47 @@ class DispatchMetadataTests(unittest.TestCase):
 
 
 class IommuDescriptorTests(unittest.TestCase):
+    def test_decodes_null_terminated_authenticated_endpoint_table(self):
+        table = 0x3000
+        imagebase = 0x100000000
+        values = {
+            table: 0x8020000000000120,
+            table + 8: 0,
+            table + 0x10: 0x84C0000000000240,
+            table + 0x18: 7,
+            table + 0x20: 0,
+            table + 0x28: 0,
+        }
+        image = types.SimpleNamespace(
+            read_u64=lambda address: values.get(address),
+            resolve_chained_pointer=lambda encoded: (
+                imagebase + (encoded & 0xFFFFFFFF) if encoded else None
+            ),
+        )
+
+        result = analyzer._summarize_iommu_endpoint_table(
+            image,
+            table,
+            {imagebase + 0x120: ["sptm_uat_init_state"]},
+        )
+
+        self.assertEqual(result["entry_stride"], 0x10)
+        self.assertEqual(result["entry_count"], 2)
+        self.assertTrue(result["terminated_by_null_entry"])
+        self.assertEqual(
+            result["entries"][0]["pointer_encoding"],
+            "authenticated_chained",
+        )
+        self.assertEqual(
+            result["entries"][0]["anchors"],
+            ["sptm_uat_init_state"],
+        )
+        self.assertEqual(
+            result["entries"][0]["primary_anchors"],
+            ["sptm_uat_init_state"],
+        )
+        self.assertEqual(result["entries"][1]["metadata"], 7)
+
     def test_decodes_dispatch_ids_and_permission_masks(self):
         descriptor = 0x2000
         imagebase = 0x100000000

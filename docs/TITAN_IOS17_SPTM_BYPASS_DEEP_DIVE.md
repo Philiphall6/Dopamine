@@ -407,6 +407,25 @@ and named signing/MMU candidate in each GFX slice. The companion symmetric
 comparator applies the same census to every historical build so that changes
 between 17.4 beta 3, 17.4 beta 4, and 23A355 are measured rather than inferred.
 
+The symmetric dispatch pass now narrows this further. Through `22B5045g`, the
+GXF vector enters `__rtk_mmu_gxf_dispatcher` directly. On `23A355`, bit 0 of
+the entry selector retains that route and bit 1 selects
+`__rtk_uppl_client_dispatcher`. The UPPL packet contains a 32-bit index and four
+64-bit arguments, checks both bounds and a null handler, then transfers through
+`BRAAZ`. Its packaged count and table pointer are both zero, proving that the
+handler table is runtime-populated and preventing a static assignment of
+indices to `map`, `unmap`, or `update_mapping`.
+
+The direct GXF `map` route has a separate range guard before
+`__rtk_mmu_map`; the mapping handler itself retains only the translation-region
+lookup through `_mmu_get_tt_info` plus attribute decoding. This places the
+unresolved authorization boundary at the UPPL table producer rather than at
+the handler body. `23A355` also adds encoded attribute class `0x8000` (emitting
+descriptor value `0x419`) and a context-switch check over state byte `+0x638`
+and argument bit `x2[0]`. These are exact static deltas, not assigned policy
+names or evidence of reachability. The durable checkpoint and next analysis
+task are recorded in [A15 / iOS 26.0.1 Research Worklog](A15_IOS26_WORKLOG.md).
+
 ## Mapping to the Current iPhone14,2 / 23A355 Trace
 
 | Published iOS 17 stage | Current 23A355 result |

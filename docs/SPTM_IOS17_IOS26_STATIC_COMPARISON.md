@@ -416,6 +416,33 @@ domain masks, and proves equivalent IOMMU registrations across the descriptor
 layout migration. It finds no residual bypass branch. Static similarity still
 cannot establish selector, ABI, endpoint, bypass, or runtime-response identity.
 
+## Symmetric analyzer v10 endpoint tables
+
+The v10 pass decodes the function-pointer tables referenced by the v9 IOMMU
+descriptors. Registration identities remain unchanged, but every observed
+table grows on 23A355:
+
+| Driver/table | 21B91 handlers | 23A355 handlers |
+|---|---:|---:|
+| SART / ID 5 mask 0x2 | 2 | 3 |
+| NVMe / ID 6 mask 0x2 | 3 | 9 |
+| UAT / ID 7 mask 0x2 | 7 | 13 |
+| t8110dart / ID 3 mask 0x2 | 9 | 17 |
+| t8110dart / ID 4 mask 0x8 | 1 | 4 |
+
+For UAT, 23A355 explicitly adds or separates destroy-state, unmap-table,
+continuation, and remove-context operations. The new endpoint lifecycle is a
+confirmed protected-side expansion, not proof of weaker authorization. The
+UAT table remains distinct from GFX's runtime-populated UPPL client table until
+a direct producer or relocation link is recovered.
+
+| v10 artifact | SHA-256 |
+|---|---|
+| `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v10.md` | `5D6DADB165E0B4B7AF39B77BCEBC05B41193F28478BF14673986BCCA793005D4` |
+| `sptm-txm-static-report-v10.json` | `498757C670945373111A06727843CF73E785D985C924D165101400C09A90BBBE` |
+| `sptm-txm-static-report-v10.md` | `80E58C6FFB4CAA83A8B427FA07F4A94B2304B2391F9BB5EF7DF42805458E4AEE` |
+
 ## Sources
 
 - https://newosxbook.com/bonus/sptm2.html

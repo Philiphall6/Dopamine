@@ -15,6 +15,12 @@ GFX report also inventories all static `MSR TTBR0_EL1`/`MSR TTBR1_EL1`,
 `PACGA`, and `ERET` sites. PACGA-chain labels are bounded local heuristics;
 they do not establish a signing oracle or a bypass.
 
+The same GFX pass reconstructs the GXF entry routes, the static UPPL packet
+layout, authenticated dispatch form, packaged table state, mapping-handler
+calls, range-guard candidates, accepted attribute classes, and context-switch
+guard. A runtime-populated zero table is reported as unresolved rather than
+being assigned speculative handler indices.
+
 `analyze_vtable_fields.py` decodes authenticated chained vtable entries in an
 offline kernelcache and reports accesses to selected object-field offsets.
 `disassemble_fileset.py` resolves unslid virtual addresses across every fileset
@@ -99,6 +105,8 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
   source registers instead of assigning unsupported immediate values
 - symmetric IOMMU descriptor decoding across direct and chained-registry
   layouts, including final table IDs and domain permission masks
+- null-terminated IOMMU endpoint-table decoding with `0x10`-byte records,
+  authenticated chained handlers, and directly referenced function anchors
 
 These results show patchfinder compatibility for the inspected paths. They do
 not provide the unrestricted physical-write primitive required by Dopamine's
@@ -125,6 +133,11 @@ runtime branch.
 Registration arguments are reported as raw values. The symmetric report's
 consumer analysis establishes that the stored `x2` value is a caller-domain
 permission bitset; it remains distinct from the state machine's event index.
+
+Endpoint-table anchors are static provenance, not a request recipe. An entry
+without a directly referenced `sptm_*` anchor remains unnamed, and the SPTM
+UAT table is not equated with GFX's separately runtime-populated UPPL handler
+table without a direct producer-side reference.
 
 The Titan report has the same limitation. A static PASS does not validate the
 live RTKit state, command-buffer setup, GFX ROP trigger, or physical-write

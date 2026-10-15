@@ -33,6 +33,7 @@ def build_report(images: list[tuple[str, pathlib.Path]]) -> dict:
         result = analyze_gfx(path)
         for firmware_slice in result["slices"]:
             controls = firmware_slice["security_controls"]
+            dispatch = firmware_slice["mmu_dispatch_contract"]
             classifications = collections.Counter(
                 chain["classification"] for chain in controls["pacga_chains"]
             )
@@ -57,6 +58,7 @@ def build_report(images: list[tuple[str, pathlib.Path]]) -> dict:
                     "pacga_classifications": dict(sorted(classifications.items())),
                     "eret_sites": controls["eret_sites"],
                     "security_symbols": firmware_slice["security_symbol_candidates"],
+                    "mmu_dispatch_contract": dispatch,
                 }
             )
     return {
@@ -77,8 +79,8 @@ def render_markdown(report: dict) -> str:
         report["limitations"],
         "",
         "| Build label | Slice | Legacy Titan | Adapted static | TTBR0 writes | "
-        "TTBR1 writes | PACGA chains | ERET |",
-        "|---|---|---:|---:|---:|---:|---:|---:|",
+        "TTBR1 writes | PACGA chains | ERET | UPPL route | Auth boundary |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for record in report["records"]:
         lines.append(
@@ -86,7 +88,9 @@ def render_markdown(report: dict) -> str:
             f"**{record['legacy_titan_status']}** | "
             f"**{record['adapted_static_status']}** | "
             f"{len(record['ttbr0_writes'])} | {len(record['ttbr1_writes'])} | "
-            f"{len(record['pacga_chains'])} | {len(record['eret_sites'])} |"
+            f"{len(record['pacga_chains'])} | {len(record['eret_sites'])} | "
+            f"{'yes' if record['mmu_dispatch_contract']['uppl']['status'] == 'PASS' else 'no'} | "
+            f"`{record['mmu_dispatch_contract']['mapping']['authorization_boundary']}` |"
         )
 
     for record in report["records"]:
@@ -135,6 +139,75 @@ def render_markdown(report: dict) -> str:
         ) or "none observed"
         lines.extend(["", f"Named signing/MMU candidates: {symbols}."])
 
+        dispatch = record["mmu_dispatch_contract"]
+        lines.extend(
+            [
+                "",
+                "### GXF/UPPL mapping boundary",
+                "",
+                "| Property | Static observation |",
+                "|---|---|",
+            ]
+        )
+        routes = dispatch["entry"].get("routes", [])
+        route_text = ", ".join(
+            (
+                f"priority {route['priority']}: bit {route['bit']} -> "
+                f"`{route['target_symbol'] or hex_value(route['target'])}`"
+                if route["bit"] is not None
+                else (
+                    "direct -> `"
+                    f"{route['target_symbol'] or hex_value(route['target'])}`"
+                )
+            )
+            for route in routes
+        ) or "not resolved"
+        lines.append(f"| GXF entry routes | {route_text} |")
+        uppl = dispatch["uppl"]
+        if uppl["status"] == "PASS":
+            lines.append(
+                "| UPPL packet | `u32 index @ +0x0`, four `u64` arguments at "
+                "`+0x8..+0x20`, authenticated `BRAAZ` |"
+            )
+            lines.append(
+                f"| UPPL table | `{uppl['table_status']}`; packaged count="
+                f"`{hex_value(uppl['static_handler_count'])}`, pointer="
+                f"`{hex_value(uppl['static_handler_table'])}` |"
+            )
+            errors = uppl.get("error_returns", {})
+            lines.append(
+                "| UPPL rejects | index out of bounds="
+                f"`{hex_value(errors.get('index_out_of_bounds'))}`; null handler="
+                f"`{hex_value(errors.get('null_handler'))}` |"
+            )
+        else:
+            lines.append("| UPPL packet | not present |")
+            lines.append("| UPPL table | not present |")
+            lines.append("| UPPL rejects | not present |")
+        mapping = dispatch["mapping"]
+        lines.append(
+            f"| Direct GXF range guard | "
+            f"{'observed' if mapping['direct_gxf']['separate_ingress_guard_observed'] else 'not classified'} |"
+        )
+        lines.append(
+            f"| Authorization boundary | `{mapping['authorization_boundary']}` |"
+        )
+        classes = ", ".join(
+            f"`{hex_value(value)}`" for value in mapping["attribute_classes"]
+        )
+        lines.append(f"| Encoded attribute classes | {classes} |")
+        context_guard = mapping["context_switch_guard"]
+        lines.append(
+            "| Context switch guard | "
+            + (
+                "state byte `+0x638`; authorization bit `x2[0]`"
+                if context_guard["observed"]
+                else "not observed"
+            )
+            + " |"
+        )
+        lines.append(f"| Interpretation | {mapping['interpretation']} |")
+
     lines.extend(
         [
             "",
@@ -144,6 +217,10 @@ def render_markdown(report: dict) -> str:
             "modifier, key domain, output, and accepted destination are controllable. "
             "Likewise, an MMU mapping routine is not a bypass unless its caller and "
             "authorization boundary are independently established.",
+            "The UPPL handler table is runtime-populated in 23A355. A zeroed "
+            "packaged table prevents static assignment of an index to `map`, "
+            "`unmap`, or `update_mapping`; this is recorded as an unresolved "
+            "runtime authorization boundary, not filled in by inference.",
             "",
         ]
     )
