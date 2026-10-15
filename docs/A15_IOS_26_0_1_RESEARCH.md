@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_LAYOUT_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_DECODE_SOURCE_READY`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
@@ -203,6 +203,32 @@ self `task.itk_space`, and logs fixed eight-byte windows at `task +
 from those words. The output distinguishes a stale `task.itk_space` offset from
 a moved `ipc_space` table field or changed SMR encoding.
 
+## Seventh Active Device Result
+
+The IPC-layout `b66873e` build was run on the exact target on 2026-10-15 at
+17:17. ClearSword, Titan's target gate, patchfinder, IORVBAR traversal, and the
+bounded `backboardd` lookup all passed. The process resolved uniquely at proc
+`0xffffffe08fa67b40`, pid 72, after 397 traversed processes. The device did not
+panic or reboot.
+
+The symmetric exact-read windows prove the asserted layouts instead of merely
+suggesting them. Both target and self tasks contain their respective canonical
+`itk_space` pointer at `task + 0x310`. Both IPC spaces contain their respective
+signed task backpointer at `ipc_space + 0x50`, immediately after the encoded
+table word at `+0x48`. The target raw table word is
+`0x96f958ac50f4c004`; removing its pointer signature first and then applying
+Titan's existing SMR allocation decoder reconstructs
+`0xffffffec50f4c000`, allocation size `0x10000`, and 2730 complete `0x18`-byte
+entries with a `0x10`-byte allocation tail. This exactly reproduces the table
+address and count seen by the older non-exact path.
+
+The failure is therefore not a moved `task` or `ipc_space` field and does not
+require a new XNU layout guess. `ipc_space_table_exact` passed the raw signed
+word directly to `ipc_table_resolve`, while the historical path first called
+`UNSIGN_PTR`. The corrected source restores that normalization and retains the
+bounded read-only census. The exact-target stop before `task_copy_ipc_entry`
+remains unconditional.
+
 ## End-to-End Chain Status
 
 | Stage | Status | Evidence or blocker |
@@ -215,7 +241,7 @@ a moved `ipc_space` table field or changed SMR encoding.
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
 | Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
-| Titan unrestricted physical write | **NOT REACHED / CLEAN IPC LOOKUP STOP** | IORVBAR and `backboardd` lookup passed; the legacy port-type/vtable filter found no userclient before IPC entry copy or GFX submission |
+| Titan unrestricted physical write | **NOT REACHED / CLEAN IPC DECODE STOP** | IORVBAR, `backboardd`, and the symmetric IPC layout passed; signed-table normalization is corrected in source before a bounded census, with IPC entry copy and GFX submission still blocked |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
@@ -306,8 +332,8 @@ captures.
 | GFX firmware patchfinder | `STATIC_PASS` on the extracted image |
 | IORVBAR object traversal | `ACTIVE_PASS`; exact descriptor and map validation completed on-device |
 | `backboardd` process lookup | `ACTIVE_PASS`; pid 72 and unique `proc` reproduced |
-| Exact IPC-table decode | `ACTIVE_BLOCKED`; `ipc_space + 0x48` yielded no decodable table in the exact-read census |
-| Open IOGPU userclient lookup | `NOT_REACHED`; bounded IPC layout source ready |
+| Exact IPC-table decode | `ROOT_CAUSE_FOUND`; normalize the signed `+0x48` word before the existing SMR allocation decoder |
+| Open IOGPU userclient lookup | `NOT_REACHED`; corrected bounded read-only census source ready |
 | GFX physical addresses and translation root | `DEVICE_RESULT_PENDING`; not reached in first run |
 | Controlled mapping window | `DEVICE_RESULT_PENDING` |
 | Titan `physwritebuf` publication | `DEVICE_RESULT_PENDING` |
@@ -968,34 +994,30 @@ Consequences:
   IPC table; it does not validate command queues, RTKit parsing, GFX ROP, or an
   SPTM/TXM path.
 
-### IPC_SPACE_LAYOUT_DISCOVERY_REQUIRED
+### IPC_TABLE_SMR_DECODE_CORRECTION_REQUIRED
 
-The `8beefad` exact-read census proves that process discovery is no longer the
-first blocker. `backboardd` resolves consistently, but the asserted
-`task.itk_space` and `ipc_space.table=0x48` path does not yield a decodable IPC
-table in the exact-read path. The older non-exact decoder's earlier 2730-entry
-result is therefore evidence to compare, not a layout contract to trust.
+The `b66873e` symmetric layout probe proves `task.itk_space=0x310`,
+`ipc_space.table=0x48`, and the adjacent task backpointer at `+0x50`. It also
+proves that the exact-read path omitted the `UNSIGN_PTR` normalization already
+performed by the historical path before SMR allocation decoding.
 
 Consequences:
 
-- Record the raw table word even when pointer or size decoding fails.
-- Compare the target task and IPC-space words with the current Dopamine process
-  under the same exact-read primitive.
-- Bound task inspection to `+0x2f0..+0x330` and IPC-space inspection to
-  `+0x00..+0x80`, in eight-byte words.
-- Do not follow a port, kobject, wrapper, or userclient from layout-probe words.
+- Normalize the encoded table word before applying `ipc_table_resolve`.
+- Treat the allocation size as an upper byte bound and scan only complete
+  `0x18`-byte entries; record but never read the remaining allocation tail.
+- Keep the census capped at 4096 entries and all candidate/type logs capped at
+  64 records.
 - Keep the unconditional exact-target stop before `task_copy_ipc_entry`.
 
 ## Next Steps
 
-1. Install and run the verified bounded IPC-layout IPA once on the exact target.
-2. Recover the `titan.ipc-layout START`,
-   `WORD`, and `STOP` records.
-3. Compare target and self task/IPC-space windows offline before selecting any
-   replacement offset or decoder.
-4. Require a stable exact-read IPC table before re-enabling the read-only port
-   census; do not infer one from the historical decoder.
-5. Keep the normal jailbreak, physrw, privilege, trust-cache, and bootstrap
+1. Build and package the corrected exact-read IPC table decoder.
+2. Run the bounded read-only census once and recover its `START`, `TYPE`,
+   `CANDIDATE`, `SUMMARY`, and `STOP` records.
+3. Compare the observed object/vtable census with the live IOMachPort wrapper
+   vtable before selecting any later command-buffer experiment.
+4. Keep the normal jailbreak, physrw, privilege, trust-cache, and bootstrap
    stages disabled until Titan's physical-write publication is independently
    reproduced.
 

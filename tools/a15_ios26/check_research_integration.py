@@ -254,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_LAYOUT_BUILT" in report,
-        "report does not record the verified bounded IPC layout build state",
+        "ACTIVE_TITAN_PROBE_IPC_CENSUS_DECODE_SOURCE_READY" in report,
+        "report does not record the corrected bounded IPC census source state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
@@ -357,6 +357,8 @@ def main() -> int:
         "TITAN_IOS26_TASK_LAYOUT_END",
         "TITAN_IOS26_IPC_SPACE_LAYOUT_END",
         "ipc_space_table_exact",
+        "ipc_table_resolve(normalized_table, &size)",
+        "uint64_t normalized_table = UNSIGN_PTR(encoded_table)",
         "process_census_open_userclients",
         "titan_read_pointer_exact",
         "gTitanContext.iomachport_vtable",
@@ -365,6 +367,7 @@ def main() -> int:
         "titan.ipc-census CANDIDATE",
         "titan.ipc-census TYPE",
         "titan.ipc-census SUMMARY",
+        "allocation=0x%x entries=%u entry-size=0x%x tail=0x%x",
         "table-stable=%s pid-stable=%s",
         "titan.ipc-layout START",
         "titan.ipc-layout WORD",
@@ -383,6 +386,12 @@ def main() -> int:
     census_body = ipc_port[census_start:census_end]
     for forbidden in ("kwrite", "task_copy_ipc_entry", "mach_port_", "IOConnectCall"):
         require(forbidden not in census_body, f"read-only IPC census contains {forbidden}")
+    require(
+        "ipc_table_size % ipc_entry_size != 0" not in census_body
+        and "ipc_table_count = ipc_table_size / ipc_entry_size" in census_body
+        and "ipc_table_tail = ipc_table_size % ipc_entry_size" in census_body,
+        "IPC census does not preserve the bounded complete-entry plus allocation-tail contract",
+    )
     for marker in (
         "titan.iorvbar.wrapper-vtable-read",
         "titan.iorvbar.wrapper-vtable",
