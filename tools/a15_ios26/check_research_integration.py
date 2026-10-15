@@ -380,6 +380,11 @@ def main() -> int:
     layout_body = ipc_port[layout_start:layout_end]
     for forbidden in ("kwrite", "task_copy_ipc_entry", "mach_port_", "IOConnectCall"):
         require(forbidden not in layout_body, f"read-only IPC layout probe contains {forbidden}")
+    require(
+        "unsigned_value = raw ? UNSIGN_PTR(raw) : 0" in layout_body
+        and "ipc_table_resolve(unsigned_value, &decoded_size)" in layout_body,
+        "fallback IPC layout logger does not normalize signed SMR words",
+    )
     census_start = ipc_port.find("static uint64_t process_census_open_userclients")
     census_end = ipc_port.find("uint64_t process_find_open_userclient", census_start)
     require(census_start >= 0 and census_end > census_start, "IPC census body is missing")
