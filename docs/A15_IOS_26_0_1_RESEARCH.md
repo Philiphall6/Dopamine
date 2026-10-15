@@ -427,7 +427,17 @@ The reproducible phase 4 build completed successfully on 2026-10-15:
 Post-build inspection confirms the v4 schema, output filename, bounded
 IOSurface checkpoint, and all five negative safety flags in the main
 executable. Titan's declared iOS `16.1` through `17.3.1` range is unchanged.
-Device observations for this phase are pending.
+
+The phase 4 diagnostic completed on the USB-connected target on 2026-10-15.
+Its 21 checkpoints were pulled as
+`a15-ios26-diagnostic-v4-device-20261015.json`, with SHA-256
+`B24D91C86D3251446730207D6B97C8EF1DAB41CF00DB3AA6BA3DF3215523C3F5`.
+The standard IOSurface result is `PASS`: width `16`, height `16`, bytes per row
+`64`, allocation size `1,024`, and `released=true`. Base-address access,
+Mach-port creation, prefetching, memory-region selection, and IOKit calls all
+remain false. The app-owned 16 KiB VM allocation/deallocation also remains
+`PASS` with no write. Selector, kernel, Titan, and SPTM/TXM states are unchanged:
+`ppl-bypass-missing`, `MISSING`, `BLOCKED`, and `NOT_REACHED`, respectively.
 
 ## Remaining Hypotheses
 
