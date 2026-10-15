@@ -355,11 +355,15 @@ The v9 artifacts add symmetric IOMMU descriptor and registration topology:
 | `sptm-txm-static-report-v9.json` | `64CD0866F24A691ACBD4ED872E38682BF41019D43433F29AB0E1E3BDF571E64C` |
 | `sptm-txm-static-report-v9.md` | `B839CCB6C06CA198B7550C172CD7620D495E31D5476F1C96C716DFCCB84B0DC1` |
 
-The current chain still stops before protected execution. The first metadata
-blocker is `selector.ppl_metadata`; the first runtime blocker is
-`kernel.runtime_read_write`. Request generation, transmission, handler
-dispatch, and response receipt are all false. Therefore this comparison cannot
-identify an SPTM rejection code or claim a live SPTM/TXM behavior change.
+The current trace still stops before protected execution. The first metadata
+blocker is `selector.ppl_metadata`; it records `kernel.runtime_read_write` as
+the first runtime blocker because the bounded probe deliberately selected but
+did not execute ClearSword. At the source-integration level ClearSword and
+DarkSword are the iOS 26.0.1 kernel candidates, so, conditional on their normal
+runtime primitive, the remaining architectural blocker for A15 is SPTM/TXM.
+Request generation, transmission, handler dispatch, and response receipt are
+all false. Therefore this comparison cannot identify an SPTM rejection code or
+claim a live SPTM/TXM behavior change.
 
 ## Titan Gap Between iOS 17 and iOS 26
 

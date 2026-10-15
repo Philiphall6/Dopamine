@@ -25,16 +25,19 @@ jailbreak path on this exact device and OS combination.
 | Existing GFX IORVBAR mapping | **VALIDATED** | One existing 8-byte `IOMemoryMap`; address recorded but never dereferenced |
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
-| Kernel read/write exploit primitive | **MISSING** | No target-compatible primitive has been established |
+| Kernel read/write exploit primitive | **CANDIDATE / RUNTIME UNVERIFIED** | ClearSword and DarkSword declare support through 26.0.1; the device dry run selects ClearSword but deliberately does not call `exploit_init` |
 | Titan unrestricted physical write | **BLOCKED** | No command queue, GPU trigger, MMIO access, or physical write was executed |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
-| Bootstrap, trust-cache, and jailbreak services | **NOT REACHABLE** | Depend on the missing kernel and SPTM primitives |
+| Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **BLOCKED** | App guard returns unsupported before exploit selection |
 
-The first unresolved operational link is a valid kernel read/write primitive
-for this exact target. Even if that existed, Titan's physical-write stage and
-the SPTM/PAPT bypass would still require separate validation. Passing static
-patchfinders does not bridge either gap.
+ClearSword/DarkSword provide the kernel read/write candidate used through iOS
+26.0.1, and the device-side selector chooses ClearSword for this exact target.
+The current diagnostic intentionally stops before loading the framework or
+calling `exploit_init`, so it does not constitute runtime proof on iPhone14,2.
+Assuming that established primitive behaves on A15 as designed, the remaining
+architectural blocker is the SPTM/TXM protected-write path. Passing static
+patchfinders does not by itself bridge that final gap.
 
 ## How the Published Titan Chain Works
 
@@ -58,8 +61,9 @@ The published Titan path has four architectural phases:
    knowing their static addresses does not create the physical-write primitive.
 
 For iPhone14,2 on iOS 26.0.1, phases 1 and 2 are only partially represented by
-offline and bounded read-only evidence. The current research guard stops before
-GPU command-buffer setup. No target-compatible kernel read/write exploit,
+offline and bounded read-only evidence. ClearSword and DarkSword are packaged
+as kernel candidates and ClearSword is metadata-selected, but the current
+research guard stops before executing it or setting up GPU command buffers. No
 RTKit execution path, controlled mapping window, unrestricted physical write,
 or SPTM bypass has been established. The static TXM base and passing XPF
 relationships therefore improve the map of the chain but do not bypass TXM.
@@ -134,8 +138,9 @@ The seven reported checkpoints match the expected bounded state:
 
 - `target.identity`, `environment.sptm`, and `titan.framework_metadata` are
   `OBSERVED`.
-- `kernel.runtime_read_write` is `MISSING` because no target-compatible
-  primitive is available.
+- `kernel.runtime_read_write` is reported as `MISSING` because the bounded
+  diagnostic never loads or executes the metadata-selected ClearSword
+  candidate; this is lack of runtime evidence, not absence of exploit code.
 - `titan.command_buffers` is `BLOCKED` by diagnostic mode.
 - `titan.physical_write` and `sptm_txm.runtime_response` are `NOT_REACHED`.
 - `diagnostic_only` is true and `asserts_live_sptm_txm_response` is false.
@@ -617,8 +622,8 @@ be transferred from `23B85` to `23A355`.
 The reusable part is methodological: build-and-device keyed offset profiles,
 staged primitive validation, bounded retries, and explicit logging between
 chain stages. These patterns can improve diagnostics, but pois0nSword is not a
-replacement for the missing `kernel.runtime_read_write` and
-`selector.ppl_metadata` stages in the current Dopamine trace.
+replacement for runtime confirmation of the selected ClearSword primitive or
+the missing `selector.ppl_metadata` stage in the current Dopamine trace.
 
 Primary references:
 
