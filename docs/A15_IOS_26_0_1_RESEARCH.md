@@ -12,27 +12,30 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_READY`
+- Research state: `ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `16487f1`
-- GitHub Actions run: `38724149742` (`PASS`)
-- IPA: `Dopamine-A15-iOS26-active-titan-probe-16487f1.ipa`
-- Size: `55,465,418` bytes
-- SHA-256: `40F65381CD46191F33FA4F6E1F5AF007EF6BE699453108CC76E79697EB888684`
+- Source commit: `e702adc`
+- GitHub Actions run: `38727550502` (`PASS`, 10m 01s)
+- IPA: `Dopamine-A15-iOS26-iorvbar-read-window-e702adc.ipa`
+- Size: `55,465,845` bytes
+- SHA-256: `613E70196EB95BBC17E698674EBED5EAD453619BD5589F4604B611DAB1847419`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` are present.
 
-This build was run on the exact target on 2026-10-15. It reached Titan's
-iOS 26 IORVBAR object traversal and rebooted the device with a kernel panic.
-The corrected source described below has not yet been packaged or run.
+This corrected build has not yet been run on the target. Package inspection
+confirms the main executable, app `Info.plist`, and Titan framework are present;
+the packaged Titan binary contains the new bounded-window failure markers.
 
 ## First Active Device Result
 
-The device panic was recovered over USB as
-`panic-full-2026-10-15-131411.000.ips` (1,468,402 bytes). Its incident is
+The previous `16487f1` build was run on the exact target on 2026-10-15. It
+reached Titan's iOS 26 IORVBAR object traversal and rebooted the device. The
+panic was recovered over USB as `panic-full-2026-10-15-131411.000.ips`
+(1,468,402 bytes), SHA-256
+`F323AEB9E0C2D48CA0E7BD809CB34C22EA45071D299D46B474CCF47F8E6C8121`. Its incident is
 `618738CD-2B6B-4577-84AC-DD659A822CE5`; the panicked task is Dopamine, pid 843.
 The panic string is a zone-bound violation: a 32-byte read starting at offset
 `0x20` overflowed a 40-byte object in the `iokit.IOMachPort` zone.

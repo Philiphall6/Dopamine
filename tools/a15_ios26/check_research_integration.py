@@ -248,7 +248,7 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_READY" in report,
+        "ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_BUILT" in report,
         "report does not record the IOMachPort read-window correction state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
