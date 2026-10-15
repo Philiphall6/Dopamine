@@ -12,16 +12,16 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_DECODE_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_V2_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `ac8b14d48341ef7aa14c0d1e0381c524d89168d4`
-- GitHub Actions run: `38760077616` (`PASS`, 12m 30s)
-- IPA: `Dopamine-A15-iOS26-ipc-census-decode-ac8b14d.ipa`
-- Size: `55,472,827` bytes
-- SHA-256: `EF2D674B030DA9463B0D97AFE7A25DC7247201E938DACB37FEAC4958E0816BF1`
+- Source commit: `808d9c5b8598ca39ebd2e720c5ae8a09c9e0ef8e`
+- GitHub Actions run: `38776138160` (`PASS`, 8m 32s)
+- IPA: `Dopamine-A15-iOS26-ipc-census-v2-808d9c5.ipa`
+- Size: `55,473,266` bytes
+- SHA-256: `73B27D03E7EDDC9FAA7F7B7B3C6A46F0E679DD9C76F52F9BBDB4BE349D552B04`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` and
   `Frameworks/ClearSword.framework/ClearSword` are present.
@@ -29,13 +29,17 @@ bootstrap.
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
 packaged Titan binary contains all nine exact-read map/descriptor checkpoints,
 the bounded process-name discovery, the symmetric IPC-layout markers, and the
-corrected IPC census `START`, `TYPE`, `CANDIDATE`, `SUMMARY`, and `STOP`
-markers. Its `START` record includes allocation size, complete-entry count,
-entry size, and unused tail. The binary also contains the explicit
+corrected IPC census `DECODE`, `START`, `TYPE`, `CANDIDATE`, `SUMMARY`, and
+`STOP` markers. The probe entry and decoder both identify revision
+`ipc-census-v2`. `DECODE` records the raw signed table word, its normalized
+pointer, the SMR-decoded table, and allocation size; `START` records complete
+entry count, entry size, and unused tail. The binary also contains the explicit
 `task_copy_ipc_entry not reached` stop marker. Source inspection and the
 integration checker confirm that both the operational decoder and fallback
 logger remove the pointer signature before applying the existing SMR allocation
-decoder.
+decoder. The iOS 26 patchfinder now reports the rejected primary
+`IOMemoryMap::fAddress` match as an expected accessor-pattern retry, rather than
+as a false error.
 
 ## First Active Device Result
 
@@ -949,9 +953,21 @@ unknown quarantine bypass. It therefore confirms a promising primitive class,
 not an A15 jailbreak path.
 
 `tosoonmulu123-ui/DSPloit` claims full A15/iOS 26.0.1 support in its README,
-but its own context-transfer document says device confirmation was performed
-only on an iPhone XR with iOS 18.2 and lists AMFI, trust-cache, PAC, and PPL
-steps as blocked. Its A15 compatibility claim is not accepted as validation.
+but the claim is not supported by its implementation or public CI evidence.
+The latest default-branch revision, `905a4389c379`, fails its public build run
+[`27388189528`](https://github.com/tosoonmulu123-ui/DSPloit/actions/runs/27388189528),
+so no current release artifact is produced. `DeviceCompat.swift` marks iOS
+26.0-26.0.1 supported from a version-range condition; it is not a device proof.
+The fallback JPEG path says that the IOSurface-to-socket transition is still a
+TODO and returns failure, while the SEPKeyStore path says full weaponization
+still needs an information leak and gadget resolution. More importantly for
+23A355, `amfi_bypass.m` labels its three fixed pmap/AMFI addresses as results
+from an iOS 18.2 kernelcache, acknowledges PPL-blocked writes, and skips a
+per-pmap write because it can respring devices. Its own context-transfer
+document says device confirmation was only on an iPhone XR with iOS 18.2 and
+lists AMFI, trust-cache, PAC, and PPL steps as blocked. DSPloit therefore
+contains useful DarkSword-derived experiments, but no validated A15/23A355
+SPTM/TXM bypass or complete jailbreak chain that can be transplanted here.
 
 Other useful repositories remain analysis infrastructure rather than an
 on-device bypass: `Lessica/libgrabkernel2` can extract the A15 23A355
