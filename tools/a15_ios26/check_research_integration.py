@@ -254,7 +254,7 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_CENSUS_SOURCE_READY" in report,
+        "ACTIVE_TITAN_PROBE_IPC_CENSUS_BUILT" in report,
         "report does not record the bounded IPC census state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):

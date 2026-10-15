@@ -12,25 +12,27 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_SOURCE_READY`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `a720b8a`
-- GitHub Actions run: `38748664669` (`PASS`, 12m 22s)
-- IPA: `Dopamine-A15-iOS26-proc-name-a720b8a.ipa`
-- Size: `55,469,034` bytes
-- SHA-256: `5160FFA45D38861C5452513FACD6C5CEA949F9EA059A645F7B23E6022E179206`
+- Source commit: `8beefad`
+- GitHub Actions run: `38752695837` (`PASS`, 10m 46s)
+- IPA: `Dopamine-A15-iOS26-ipc-census-8beefad.ipa`
+- Size: `55,471,939` bytes
+- SHA-256: `38CF50CBAE156C9726422F9D9912F0D558FC931A62A646368DE830C858ED6699`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` are present.
 
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
 packaged Titan binary contains all nine exact-read checkpoints for the map and
-descriptor fields plus the bounded `titan.proc-name-offset` and
-`titan.proc-by-name` markers. The `a720b8a` process-lookup build passed its
-intended lookup checks on-device. The next source revision adds a bounded,
-read-only IPC census; its packaged build evidence is pending.
+descriptor fields, the bounded process-name discovery, and the complete IPC
+census marker set: `START`, `TYPE`, `CANDIDATE`, `SUMMARY`, and `STOP`. It also
+contains the explicit `task_copy_ipc_entry not reached` stop marker. The
+`a720b8a` process-lookup build passed its intended lookup checks on-device;
+`8beefad` packages the resulting read-only IPC census and awaits its first
+device run.
 
 ## First Active Device Result
 
