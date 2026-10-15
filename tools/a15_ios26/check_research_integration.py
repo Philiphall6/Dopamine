@@ -251,8 +251,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_EXACT_READ_FIX_BUILT" in report,
-        "report does not record the ClearSword exact-read correction state",
+        "ACTIVE_TITAN_PROBE_DESCRIPTOR_RANGE_FIX_SOURCE_READY" in report,
+        "report does not record the descriptor-range correction state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
@@ -302,8 +302,12 @@ def main() -> int:
         "kIOS2601IOMemoryMapVtable",
         "kIOS2601GFXIORVBARPhysicalAddress = 0x206050000ULL",
         "kIOS2601GFXIORVBARLength = 0x8ULL",
+        "titan_read_exact_scalar",
+        "descriptorRanges = titan_read_valid_pointer(descriptor, 0x60",
+        "descriptorRangesCount != 1",
         "descriptorPhysical != kIOS2601GFXIORVBARPhysicalAddress",
         "descriptorLength != kIOS2601GFXIORVBARLength",
+        "descriptorRangeLength != kIOS2601GFXIORVBARLength",
         "fMemory != descriptor",
         "fOffset != 0",
         "fLength != kIOS2601GFXIORVBARLength",

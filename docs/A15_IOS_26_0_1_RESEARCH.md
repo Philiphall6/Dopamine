@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_EXACT_READ_FIX_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_DESCRIPTOR_RANGE_FIX_SOURCE_READY`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
@@ -27,8 +27,8 @@ bootstrap.
 
 The packaged ClearSword binary exports `clearsword_kreadbuf_exact` at image
 offset `0x4810`. The packaged Titan binary contains the exact-read symbol name,
-failure markers, and successful eight-byte-read marker. This build has not yet
-been run on the target.
+failure markers, and successful eight-byte-read marker. This build was run on
+the target and completed every small-allocation pointer read without a panic.
 
 ## First Active Device Result
 
@@ -84,6 +84,31 @@ implementation bounds this copy with
 allowing the pointer to be read without crossing the 16-byte allocation. The
 change remains read-only.
 
+## Third Active Device Result
+
+The exact-read `1673566` build was run on the exact target on 2026-10-15. It
+completed ClearSword in about 580 ms, validated the live kernel Mach-O header,
+entered Titan, completed the active kernel patchfinder, and traversed the full
+`gfx-asc` object path through the second `IODeviceMemory` descriptor and its
+existing `IOMemoryMap`. Every exact eight-byte read passed and the device did
+not panic.
+
+The run stopped cleanly at `titan.iorvbar.descriptor-range`. The log reported
+`descriptor+0x18` as a kernel pointer, `descriptor+0x20` as `0x10000920`, and
+`descriptor+0x30` as zero. Those values prove that the validation code was
+reading the descriptor's `_mappings`, flags, and an unrelated field as if they
+were its physical range. The earlier bounded Filza capture already established
+the correct `IOGeneralMemoryDescriptor` layout: total length at `+0x50`, ranges
+pointer at `+0x60`, range count at `+0x68`, and the single inline physical range
+at the pointed-to `{+0x0,+0x8}` pair. The same `+0x50/+0x60` accessors exist in
+libjailbreak's XNU-derived descriptor helpers.
+
+The next source revision now reads those fields through
+`clearsword_kreadbuf_exact`, requires one range, and independently validates
+both descriptor and range lengths as eight bytes. It also exact-reads the four
+`IOMemoryMap` linkage/address fields. The route still stops before MMIO access,
+GFX command submission, physical-write publication, privileges, or bootstrap.
+
 ## End-to-End Chain Status
 
 | Stage | Status | Evidence or blocker |
@@ -92,11 +117,11 @@ change remains read-only.
 | Read-only acquisition path | **PASS** | Filza bridge plus USB forwarding; probe restored disabled after each bounded capture |
 | Kernelcache, GFX, SPTM, and TXM extraction | **PASS** | Offline analyzers accept all four extracted images |
 | RTBuddy object and segment layout | **PASS** | Live object chain, two descriptors, and physical/virtual/remap field roles resolved |
-| Existing GFX IORVBAR mapping | **ACTIVE ADAPTATION** | The 8-byte `IOMemoryMap` is rediscovered and revalidated at runtime; no per-boot address is embedded |
+| Existing GFX IORVBAR mapping | **OBJECT GRAPH PASS; RANGE FIX READY** | Runtime vtables and the existing `IOMemoryMap` pass; corrected descriptor-range fields await the next build |
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
-| Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER BUILT** | ClearSword validated the live kernel header; the new ICMPv6 adapter requests eight bytes for small zone allocations |
-| Titan unrestricted physical write | **NOT REACHED / EXACT READ FIX BUILT** | Second run passed IOMachPort, then panicked on the 16-byte OSArray backing store before GFX patchfinding or ROP submission |
+| Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
+| Titan unrestricted physical write | **NOT REACHED / CLEAN DESCRIPTOR STOP** | Active kernel patchfinder and object traversal passed; stale descriptor field offsets stopped validation before MMIO or GFX submission |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
@@ -104,12 +129,11 @@ change remains read-only.
 ClearSword/DarkSword provide the kernel read/write candidate used through iOS
 26.0.1, and the device-side selector chooses ClearSword for this exact target.
 The active probe called that candidate, validated the resulting kernel read,
-and entered Titan. The first run exposed ClearSword's minimum read window at an
-IOMachPort tail field; the corrected run passed it and exposed the same fixed
-width on a 16-byte OSArray backing allocation. The exact-length ICMPv6 read
-adapter addresses both without adding a write. These points remain earlier than
-every SPTM/TXM operation; passing static patchfinders still does not bridge that
-gap.
+and entered Titan. The first two runs exposed ClearSword's minimum read window
+at an IOMachPort tail field and a 16-byte OSArray backing allocation. The
+exact-length ICMPv6 adapter passed both and reached a clean descriptor-layout
+validation failure. These points remain earlier than every SPTM/TXM operation;
+passing static patchfinders still does not bridge that gap.
 
 ## Exact-target active probe
 
@@ -171,20 +195,21 @@ response.
 
 The source records a durable checkpoint immediately before every active
 boundary, including command-buffer setup, the IORVBAR read, firmware copying,
-both patchfinders, target-job mapping, and the GFX ROP trigger. The first run
-reached IORVBAR object traversal and then panicked in the minimum-width kernel
-read described above. Later stages remain `DEVICE_RESULT_PENDING` until the
-corrected IPA is run; they must not be inferred from the static captures.
+both patchfinders, target-job mapping, and the GFX ROP trigger. The exact-read
+run passed the active kernel patchfinder and complete IORVBAR object graph, then
+stopped cleanly on stale descriptor field offsets. Later stages remain
+`DEVICE_RESULT_PENDING` until the descriptor-range IPA is run; they must not be
+inferred from the static captures.
 
 | Observable checkpoint | Current target result |
 |---|---|
 | Application support gate | `EXACT_ACTIVE_PROBE`; full jailbreak support remains false |
 | Kernel exploit result | `PASS`; ClearSword selected and live kernel Mach-O header validated |
-| Kernel patchfinder | `STATIC_PASS`; active checkpoint added |
+| Kernel patchfinder | `ACTIVE_PASS` on the exact target |
 | Titan iOS 26 guard | exact `iPhone14,2/23A355` gate plus runtime object validation |
 | RTBuddy/segment discovery | `READ_ONLY_PASS` from bounded capture |
 | GFX firmware patchfinder | `STATIC_PASS` on the extracted image |
-| IORVBAR object traversal | `INTERRUPTED`; IOMachPort tail-read correction ready |
+| IORVBAR object traversal | `OBJECT_GRAPH_PASS`; corrected descriptor-range validation source ready |
 | GFX physical addresses and translation root | `DEVICE_RESULT_PENDING`; not reached in first run |
 | Controlled mapping window | `DEVICE_RESULT_PENDING` |
 | Titan `physwritebuf` publication | `DEVICE_RESULT_PENDING` |
@@ -804,9 +829,12 @@ object graph before using it. The first runtime attempt panicked earlier while
 reading `IOMachPort::object`: ClearSword expanded the eight-byte request to its
 minimum 32-byte kernel read and crossed the object's allocation boundary. A
 tail-aligned window passed that object, then the second run proved that no
-32-byte window can fit the 16-byte OSArray backing store. The next source uses
-the kernel's exact ICMPv6 copy length for these pointer reads and stops safely if
-that adapter is unavailable.
+32-byte window can fit the 16-byte OSArray backing store. The third run used the
+kernel's exact ICMPv6 copy length and passed every small-allocation read. It then
+stopped cleanly because the active validation confused the descriptor's
+`_mappings` and flags fields with its physical range. The corrected source now
+uses the proven `+0x50/+0x60/+0x68` descriptor layout and exact-reads the single
+range before allowing the probe to continue.
 
 Consequences:
 
@@ -823,14 +851,14 @@ Consequences:
 
 ## Next Steps
 
-1. Install the ClearSword exact-read build.
+1. Build and install the corrected descriptor-range probe.
 2. Run that active probe once and recover
    `Documents/a15-ios26-active-probe.jsonl` after completion, process exit, or
    reboot.
-3. Identify the last `PASS` and following `START`/`FAIL` pair before changing
+3. Require PASS results for descriptor length, range pointer, range count,
+   physical address, range length, and the linked `IOMemoryMap` fields.
+4. Identify the last `PASS` and following `START`/`FAIL` pair before changing
    any later stage.
-4. Compare the runtime patchfinder and RTKit values with the 23A355 offline
-   reports.
 5. Keep the normal jailbreak, physrw, privilege, trust-cache, and bootstrap
    stages disabled until Titan's physical-write publication is independently
    reproduced.
