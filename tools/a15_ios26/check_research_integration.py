@@ -63,6 +63,9 @@ def main() -> int:
     main_view = (ROOT / "Application/Dopamine/UI/DOMainViewController.m").read_text()
     jailbreaker = (ROOT / "Application/Dopamine/Jailbreak/DOJailbreaker.m").read_text()
     titan = (ROOT / "Application/Dopamine/Exploits/Titan/exploit/titan.m").read_text()
+    clearsword_krw = (
+        ROOT / "Application/Dopamine/Exploits/ClearSword/exploit/krw.c"
+    ).read_text()
     kernel_patchfinder = (
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/kernel_patchfinder.c"
     ).read_text()
@@ -248,11 +251,13 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_BUILT" in report,
-        "report does not record the IOMachPort read-window correction state",
+        "ACTIVE_TITAN_PROBE_EXACT_READ_FIX_READY" in report,
+        "report does not record the ClearSword exact-read correction state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
+    for marker in ("kalloc.type.var2.16", "elements+0x8", "clearsword_kreadbuf_exact"):
+        require(marker in report, f"report is missing second active-device panic evidence: {marker}")
     for marker in ("0xfffffff007aaaf58", "dictionary=+0x20", "16-byte"):
         require(marker in report, f"report is missing OSDictionary evidence: {marker}")
     require("fAddress=+0x28" in report, "report is missing the validated map offset")
@@ -306,8 +311,16 @@ def main() -> int:
         'titan_checkpoint(@"titan.rop-wait-thread"',
         'titan_checkpoint(@"titan.rop-trigger"',
         "int triggerResult = gfx_write32",
+        'dlsym(RTLD_DEFAULT,\n                                                               "clearsword_kreadbuf_exact")',
+        "exact-kreadbuf-unavailable",
     ):
         require(marker in titan, f"active Titan adaptation is missing marker: {marker}")
+    for marker in (
+        "int clearsword_kreadbuf_exact",
+        "socklen_t read_data_length = (socklen_t)size",
+        "read_data_length < size",
+    ):
+        require(marker in clearsword_krw, f"ClearSword exact-read path is missing marker: {marker}")
     for marker in (
         "!titan_gadget(tpidrro_el0)",
         "!titan_gadget(write)",

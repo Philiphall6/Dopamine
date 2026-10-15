@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_EXACT_READ_FIX_READY`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
@@ -25,9 +25,9 @@ bootstrap.
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` are present.
 
-This corrected build has not yet been run on the target. Package inspection
-confirms the main executable, app `Info.plist`, and Titan framework are present;
-the packaged Titan binary contains the new bounded-window failure markers.
+This build was run on the exact target on 2026-10-15. It passed the original
+`IOMachPort` tail-field read and exposed the next fixed-width read failure in a
+16-byte `OSArray` backing allocation.
 
 ## First Active Device Result
 
@@ -56,6 +56,33 @@ this pointer it reads `[+0x08,+0x28)` and extracts the final eight bytes. This
 is still a read-only change; it does not add a kernel write, physical write,
 protected request, privilege change, or bootstrap operation.
 
+## Second Active Device Result
+
+The corrected `e702adc` build reached the same IORVBAR traversal and rebooted at
+the next small allocation. The panic was recovered over USB as
+`panic-full-2026-10-15-134254.0002.ips` (1,872,627 bytes), SHA-256
+`E2371579704270A15E729B047631837E6AA45C48F23BFF7F828E09B71CC64347`, incident
+`3AB69B10-DB47-4453-B918-A44C1224BB00`. The panicked task is Dopamine, pid 908.
+Its zone-bound check reports a 32-byte read from a 16-byte
+`kalloc.type.var2.16` object.
+
+Symbolication against the packaged binaries resolves the fault through
+`clearsword_kreadbuf`, libjailbreak's `kreadbuf`,
+`titan_read_valid_pointer + 0x33c`, and
+`titan_resolve_ios26_iorvbar_mapping + 0x2d4`. Disassembly identifies the call
+as the read of the second `IODeviceMemory` OSArray element at `elements+0x8`.
+This is still before IORVBAR MMIO access, GFX ROP submission, and every SPTM/TXM
+request.
+
+The next probe adds a separate exported ClearSword exact-read helper,
+`clearsword_kreadbuf_exact`. It passes an eight-byte `optlen` to
+`getsockopt(ICMP6_FILTER)` and refuses to fall back to
+the 32-byte primitive when that helper is expected but unavailable. Apple's XNU
+implementation bounds this copy with
+[`MIN(sizeof(struct icmp6_filter), optlen)`](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet6/icmp6.c#L2976-L2977),
+allowing the pointer to be read without crossing the 16-byte allocation. The
+change remains read-only.
+
 ## End-to-End Chain Status
 
 | Stage | Status | Evidence or blocker |
@@ -67,8 +94,8 @@ protected request, privilege change, or bootstrap operation.
 | Existing GFX IORVBAR mapping | **ACTIVE ADAPTATION** | The 8-byte `IOMemoryMap` is rediscovered and revalidated at runtime; no per-boot address is embedded |
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
-| Kernel read/write exploit primitive | **PASS WITH READ-WINDOW CONSTRAINT** | ClearSword validated the live kernel header; its fixed 0x20 read width must be tail-aligned near zone boundaries |
-| Titan unrestricted physical write | **NOT REACHED / IOKIT READ FIX READY** | First run panicked in IORVBAR object traversal before GFX patchfinding or ROP submission |
+| Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER READY** | ClearSword validated the live kernel header; the new ICMPv6 adapter requests eight bytes for small zone allocations |
+| Titan unrestricted physical write | **NOT REACHED / EXACT READ FIX READY** | Second run passed IOMachPort, then panicked on the 16-byte OSArray backing store before GFX patchfinding or ROP submission |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
@@ -76,9 +103,12 @@ protected request, privilege change, or bootstrap operation.
 ClearSword/DarkSword provide the kernel read/write candidate used through iOS
 26.0.1, and the device-side selector chooses ClearSword for this exact target.
 The active probe called that candidate, validated the resulting kernel read,
-and entered Titan. The first runtime blocker is now identified as ClearSword's
-minimum read window at an IOMachPort tail field. This is earlier than every
-SPTM/TXM operation; passing static patchfinders still does not bridge that gap.
+and entered Titan. The first run exposed ClearSword's minimum read window at an
+IOMachPort tail field; the corrected run passed it and exposed the same fixed
+width on a 16-byte OSArray backing allocation. The exact-length ICMPv6 read
+adapter addresses both without adding a write. These points remain earlier than
+every SPTM/TXM operation; passing static patchfinders still does not bridge that
+gap.
 
 ## Exact-target active probe
 
@@ -764,16 +794,18 @@ or build.
 
 ## Blockers
 
-### IOKIT_MINIMUM_READ_WINDOW
+### IOKIT_EXACT_READ_REQUIRED
 
 The legacy `IOMemoryMap::wireRange` signature resolves an impossible `+0x260`
 field offset and remains rejected. The active path instead rediscovers the
 already existing eight-byte map and validates `fAddress=+0x28` plus the linked
 object graph before using it. The first runtime attempt panicked earlier while
 reading `IOMachPort::object`: ClearSword expanded the eight-byte request to its
-minimum 32-byte kernel read and crossed the object's allocation boundary. The
-source now tail-aligns that read window, but the correction still needs an
-on-device run.
+minimum 32-byte kernel read and crossed the object's allocation boundary. A
+tail-aligned window passed that object, then the second run proved that no
+32-byte window can fit the 16-byte OSArray backing store. The next source uses
+the kernel's exact ICMPv6 copy length for these pointer reads and stops safely if
+that adapter is unavailable.
 
 Consequences:
 
@@ -790,8 +822,8 @@ Consequences:
 
 ## Next Steps
 
-1. Build and install the IOMachPort read-window correction.
-2. Run the corrected active probe once and recover
+1. Build and install the ClearSword exact-read adapter.
+2. Run that active probe once and recover
    `Documents/a15-ios26-active-probe.jsonl` after completion, process exit, or
    reboot.
 3. Identify the last `PASS` and following `START`/`FAIL` pair before changing
