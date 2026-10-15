@@ -1007,6 +1007,39 @@ replacement for the missing SPTM transition. The panic-oriented proof of
 concept must not be integrated into the diagnostic IPA. Static comparison with
 the iOS 26.6 fix should precede any bounded device probe.
 
+### Divine Seagull / Coruna Expansion Assessment
+
+NetAskari's 2026-10-14 analysis of the captured `Divine Seagull V5` framework
+does not disclose a working iOS 26 jailbreak chain. It describes three tracks:
+the legacy `Godkiller V1` Coruna/DarkSword path, a `Liangri_26` wrapper, and a
+parallel `Nextgen` primitive harvester. The article explicitly characterizes
+most of the iOS 26 additions as incomplete research scaffolding rather than a
+functioning deployment.
+
+The only component assessed as a real renderer bug is a WebKit
+CVE-2025-43529 use-after-free. The remaining advertised tiers include a WASM
+BBQ-JIT attempt, a WebGPU placeholder, a WASM mutator, a PAC/JOP experiment,
+an IOKit cold path, and a `splashboardd` XPC attempt. According to the captured
+code review, these tiers either poll for another tier's primitive, fall back to
+DarkSword, fuzz for crashes, or never reach a useful primitive. No public
+source or reproducible artifact for the captured framework was found outside
+the article.
+
+Most importantly, the post-primitive `pe_main.js` and `kchain_escape.js` route
+is reported as legacy code built for iOS 17 and earlier. The analyzed framework
+therefore stops before a working iOS 26 sandbox/credential transition even
+when its browser stage succeeds. Apple documents CVE-2025-43529 as a WebKit
+use-after-free capable of arbitrary code execution and fixed with improved
+memory management, but a renderer primitive does not imply kernel access or an
+SPTM/TXM bypass.
+
+For the current iPhone14,2/23A355 effort, this is useful negative evidence:
+`Divine Seagull` neither improves the already working ClearSword kernel
+primitive nor supplies Titan command-buffer acquisition, protected physical
+write, an accepted SPTM request, trust-cache insertion, or TXM policy bypass.
+Its C2 and data-harvesting portions are unrelated to the bounded diagnostic
+goal and must not be imported. No new IPA is justified by this material.
+
 Other useful repositories remain analysis infrastructure rather than an
 on-device bypass: `Lessica/libgrabkernel2` can extract the A15 23A355
 kernelcache efficiently; `cloverfield11/ios26-hypervisor-research` documents
@@ -1036,6 +1069,8 @@ Primary references:
 - https://github.com/vschko/CaseStudies/tree/main/CVE-2026-43748
 - https://github.com/vschko/CaseStudies/blob/main/CVE-2026-43748/pocs/ios_poc/poc-ane/ViewController.m
 - https://support.apple.com/en-us/128066
+- https://netaskari.substack.com/p/divine-seagull-coruna-darksword-expansion
+- https://support.apple.com/en-ae/125884
 - https://github.com/Lessica/libgrabkernel2/blob/main/docs/aea-fast-path.md
 - https://github.com/cloverfield11/ios26-hypervisor-research
 - https://github.com/jprx/qemu-sptm
