@@ -785,6 +785,159 @@ def _collect_dispatch_guards(
     return guards
 
 
+def _bounded_function_instructions(
+    image: MachOImage, function: int, instruction_limit: int = 384
+) -> list:
+    start_index = image._instruction_index.get(function)
+    if start_index is None:
+        return []
+
+    result = []
+    for instruction in image.instructions[
+        start_index : start_index + instruction_limit
+    ]:
+        if (
+            instruction.address != function
+            and instruction.mnemonic in {"pacibsp", "paciasp"}
+        ):
+            break
+        result.append(instruction)
+    return result
+
+
+def _collect_nearby_calls(
+    image: MachOImage, instructions: Sequence
+) -> list[dict]:
+    calls = []
+    first_target = None
+    for instruction in instructions:
+        if instruction.id != ARM64_INS_BL or not instruction.operands:
+            continue
+        target = image._imm(instruction.operands[0])
+        if first_target is None:
+            first_target = target
+        elif target != first_target:
+            break
+        calls.append({"address": instruction.address, "target": target})
+    return calls
+
+
+def _collect_pointer_references(image: MachOImage, target: int) -> list[dict]:
+    entries = []
+    references = sorted(image.references_to(target), key=lambda item: item.address)
+    for position, reference in enumerate(references):
+        index = image._instruction_index.get(reference.address)
+        if index is None:
+            continue
+        following = image.instructions[index + 1 : index + 33]
+        if position + 1 < len(references):
+            next_reference = references[position + 1].address
+            following = [
+                instruction
+                for instruction in following
+                if instruction.address < next_reference
+            ]
+        entries.append(
+            {
+                "address": reference.address,
+                "kind": reference.kind,
+                "function_candidate": image.function_start(reference.address),
+                "nearby_auth": [
+                    {
+                        "address": instruction.address,
+                        "mnemonic": instruction.mnemonic,
+                        "operands": instruction.op_str,
+                    }
+                    for instruction in following[:8]
+                    if instruction.mnemonic.startswith(("pac", "xpac"))
+                ],
+                "nearby_calls": _collect_nearby_calls(image, following),
+                "nearby_stores": [
+                    {
+                        "address": instruction.address,
+                        "mnemonic": instruction.mnemonic,
+                        "operands": instruction.op_str,
+                    }
+                    for instruction in following
+                    if instruction.mnemonic.startswith(("str", "stp"))
+                ],
+                "window": image.window(reference.address, before=8, after=16),
+            }
+        )
+    return entries
+
+
+def _is_authenticated_indirect_transfer(instruction) -> bool:
+    return instruction.mnemonic in {
+        "braa",
+        "brab",
+        "braaz",
+        "brabz",
+        "blraa",
+        "blrab",
+        "blraaz",
+        "blrabz",
+    }
+
+
+def _transfer_record(instruction) -> dict:
+    return {
+        "address": instruction.address,
+        "mnemonic": instruction.mnemonic,
+        "operands": instruction.op_str,
+    }
+
+
+def _collect_authenticated_transfer_paths(
+    image: MachOImage, function: int
+) -> dict:
+    instructions = _bounded_function_instructions(image, function)
+    if not instructions:
+        return {"direct": [], "tail_trampolines": []}
+
+    direct = [
+        _transfer_record(instruction)
+        for instruction in instructions
+        if _is_authenticated_indirect_transfer(instruction)
+    ]
+    range_start = instructions[0].address
+    range_end = instructions[-1].address + 4
+    tail_trampolines = []
+    for instruction in instructions:
+        if instruction.mnemonic != "b" or not instruction.operands:
+            continue
+        immediate_operands = [
+            operand
+            for operand in instruction.operands
+            if operand.type == capstone.CS_OP_IMM
+        ]
+        if not immediate_operands:
+            continue
+        target = image._imm(immediate_operands[0])
+        if range_start <= target < range_end:
+            continue
+
+        target_index = image._instruction_index.get(target)
+        if target_index is None:
+            continue
+        transfers = []
+        for candidate in image.instructions[target_index : target_index + 96]:
+            if _is_authenticated_indirect_transfer(candidate):
+                transfers.append(_transfer_record(candidate))
+            if candidate.mnemonic in {"ret", "retaa", "retab"}:
+                break
+        if transfers:
+            tail_trampolines.append(
+                {
+                    "branch": instruction.address,
+                    "target": target,
+                    "authenticated_transfers": transfers,
+                    "window": image.window(target, before=0, after=16),
+                }
+            )
+    return {"direct": direct, "tail_trampolines": tail_trampolines}
+
+
 def _annotate_dispatch_anchors(
     image: MachOImage, entries: Sequence[dict]
 ) -> tuple[list[dict], list[dict]]:
@@ -845,6 +998,12 @@ def _annotate_dispatch_anchors(
                     for source in image.branches_to(function)
                     if source not in direct_call_set
                 ],
+                "pointer_references": _collect_pointer_references(
+                    image, function
+                ),
+                "authenticated_transfer_paths": (
+                    _collect_authenticated_transfer_paths(image, function)
+                ),
                 "guards": _collect_dispatch_guards(image, function),
                 "entry_window": image.window(function, before=0, after=24),
             }
@@ -1579,6 +1738,44 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
                 f"  Bounded guards: {len(entry['guards'])}",
             )
         )
+        pointer_references = entry.get("pointer_references", [])
+        lines.append(f"  Pointer materializations: {len(pointer_references)}")
+        for reference in pointer_references:
+            auth = ", ".join(
+                f"`{_format_address(item['address'])}` "
+                f"`{item['mnemonic']} {item['operands']}`"
+                for item in reference["nearby_auth"]
+            )
+            calls = ", ".join(
+                f"`{_format_address(item['address'])}` -> "
+                f"`{_format_address(item['target'])}`"
+                for item in reference["nearby_calls"]
+            )
+            lines.append(
+                f"  - `{_format_address(reference['address'])}` "
+                f"({reference['kind']}); nearby auth: {auth or 'none'}; "
+                f"nearby calls: {calls or 'none'}"
+            )
+
+        transfer_paths = entry.get("authenticated_transfer_paths", {})
+        direct_transfers = transfer_paths.get("direct", [])
+        for transfer in direct_transfers:
+            lines.append(
+                f"  Authenticated transfer "
+                f"`{_format_address(transfer['address'])}`: "
+                f"`{transfer['mnemonic']} {transfer['operands']}`"
+            )
+        for trampoline in transfer_paths.get("tail_trampolines", []):
+            transfers = ", ".join(
+                f"`{_format_address(item['address'])}` "
+                f"`{item['mnemonic']} {item['operands']}`"
+                for item in trampoline["authenticated_transfers"]
+            )
+            lines.append(
+                f"  Tail trampoline `{_format_address(trampoline['branch'])}` "
+                f"-> `{_format_address(trampoline['target'])}`; "
+                f"authenticated transfer: {transfers}"
+            )
         for guard in entry["guards"]:
             target = (
                 "; target `" + _format_address(guard["branch_target"]) + "`"

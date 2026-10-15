@@ -170,6 +170,34 @@ restructured counterparts of checks already present on iOS 17, not a newly
 isolated residual bypass branch. Static evidence still cannot establish a
 selector ABI, accepted protected request, or exploitable control-flow path.
 
+## Authenticated Callback Path
+
+The v7 report follows code-pointer materialization through registration and
+the final indirect handler transfer:
+
+| Static stage | 21B91 | 23A355 |
+| --- | --- | --- |
+| `sptm_dispatch` pointer references | 2 | 3 |
+| Registration signing | `PACIZA x16` | `PACIZA x16` |
+| Common registrations | IDs `0`, `1`, `2`; values `2`, `4`, `8` | IDs `0`, `1`, `2`; values `2`, `4`, `8` |
+| Additional registration | Direct canonical-pointer table store | Conditional ID `0xa`, value `0x10`, plus a wrapper registration |
+| Registrar storage | `XPACI`, then `{pointer, value}` store | `XPACI`, then `{pointer, value}` store |
+| State-machine transfer | `BRAA` | `BRAA` |
+| Endpoint handler transfer | Tail trampoline, then `BLRAAZ` | Tail trampoline, then `BLRAAZ` |
+
+On 21B91, the principal materialization is at `0xfffffff0070731b4` and
+registers through `0xfffffff0070892b4`; the endpoint tail branch at
+`0xfffffff007089608` reaches trampoline `0xfffffff0070603d8`, whose final
+transfer is `BLRAAZ x11`. On 23A355, the corresponding principal
+materialization is at `0xfffffff0270a6ba4` and registers through
+`0xfffffff0270cb73c`; the endpoint tail branch at `0xfffffff0270cc32c`
+reaches `0xfffffff02708c3c4`, ending in `BLRAAZ x11`.
+
+The authenticated-callback architecture is therefore continuous. The newer
+image expands registration topology, but this comparison finds no downgrade
+to an unauthenticated endpoint transfer and no missing PAC branch that could
+be carried forward as a bypass.
+
 ## Result
 
 The high-level division of responsibility is continuous from iOS 17.1.1 to
@@ -231,6 +259,16 @@ metadata:
 | `sptm-txm-static-report-v6.json` | `175D130EB675592E8CC6EAD719E56A0166D32F52297232E2F0C7E03C30F4283B` |
 | `sptm-txm-static-report-v6.md` | `43F5B9CB13BE7C7431B69EDF82E9603A5B5F48F0E399A8AD45F1A83ED19FF27A` |
 
+The v7 artifacts add code-pointer provenance and authenticated indirect
+transfer paths:
+
+| v7 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v7.json` | `743AE7B9CA5BE3DF03613D33D4C296C68E7BED4188DBFF9946702559907388C7` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v7.md` | `47EF90A8A4AA2B64D51613A2F4B9B2C42C68B319C179B3E68476C1435521B103` |
+| `sptm-txm-static-report-v7.json` | `A45A99602CADEFE4E121E4DC14362E5EAC9B467388886A8C86BC342595FFC76E` |
+| `sptm-txm-static-report-v7.md` | `A7FF36B66B90D5E5FBFFEA8E38EDC3051914DD601CEF794A1B669711BA40E910` |
+
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
 `kernel.runtime_read_write`. Request generation, transmission, handler
@@ -280,11 +318,11 @@ and full analyzer result are recorded in
 
 The bounded `ADR` resolution, tagged frame-type policy normalization,
 entry-instruction census, direct TXM tail-branch provenance, SPTM transfer and
-dispatch-anchor census, and bounded dispatch guard graph are now implemented.
-Raw through `-v6` reports remain separate. The v6 graph identifies the
-validator counterparts and policy deltas but no residual bypass branch. Static
-similarity still cannot establish selector, ABI, endpoint, bypass, or
-runtime-response identity.
+dispatch-anchor census, bounded dispatch guard graph, and authenticated
+callback provenance are now implemented. Raw through `-v7` reports remain
+separate. The v7 graph confirms continuous PAC-protected callback dispatch and
+finds no residual bypass branch. Static similarity still cannot establish
+selector, ABI, endpoint, bypass, or runtime-response identity.
 
 ## Sources
 

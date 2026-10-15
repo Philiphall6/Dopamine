@@ -302,6 +302,26 @@ These are contract deltas, not an identified bypass or runtime response.
 | `sptm-txm-static-report-v6.json` | `175D130EB675592E8CC6EAD719E56A0166D32F52297232E2F0C7E03C30F4283B` |
 | `sptm-txm-static-report-v6.md` | `43F5B9CB13BE7C7431B69EDF82E9603A5B5F48F0E399A8AD45F1A83ED19FF27A` |
 
+## Symmetric analyzer v7 authenticated callbacks
+
+The v7 reports follow each `sptm_dispatch` code-pointer materialization, nearby
+PAC operation and registration call, then identify authenticated transfers in
+the dispatch candidates and one-hop tail trampolines.
+
+Both builds sign the callback with `PACIZA`, strip the code PAC with `XPACI`
+before canonical storage, route the state-machine action with `BRAA`, and call
+the selected endpoint handler through a tail trampoline ending in `BLRAAZ`.
+The common registrations retain IDs `0`, `1`, and `2` with values `2`, `4`,
+and `8`; 23A355 adds a conditional ID `0xa`/value `0x10` registration and a
+wrapper path. This is expanded topology, not an authentication downgrade.
+
+| v7 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v7.json` | `743AE7B9CA5BE3DF03613D33D4C296C68E7BED4188DBFF9946702559907388C7` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v7.md` | `47EF90A8A4AA2B64D51613A2F4B9B2C42C68B319C179B3E68476C1435521B103` |
+| `sptm-txm-static-report-v7.json` | `A45A99602CADEFE4E121E4DC14362E5EAC9B467388886A8C86BC342595FFC76E` |
+| `sptm-txm-static-report-v7.md` | `A7FF36B66B90D5E5FBFFEA8E38EDC3051914DD601CEF794A1B669711BA40E910` |
+
 ## Created artifacts
 
 All extracted files and generated reports are under:

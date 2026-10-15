@@ -561,6 +561,19 @@ policy migration, not an adaptable residual bypass branch. Runtime protected
 request state remains `NOT_REACHED`, so no new IPA was built for this offline
 analyzer-only phase.
 
+The v7 offline callback trace then follows `sptm_dispatch` from pointer
+materialization to endpoint invocation. Both 21B91 and 23A355 use `PACIZA` at
+registration, `XPACI` before canonical table storage, `BRAA` for the dispatch
+state-machine action, and a tail trampoline ending in `BLRAAZ` for the selected
+endpoint handler. The common table registrations remain IDs `0`, `1`, and `2`
+with values `2`, `4`, and `8`; 23A355 adds a conditional ID `0xa`/value `0x10`
+registration and a wrapper path.
+
+This removes an authentication-downgrade hypothesis: the iOS 26 path remains
+PAC-protected at the same structural stages. The added registration topology
+does not identify a reusable iOS 17 bypass branch, and the live protected
+boundary remains `NOT_REACHED`.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It

@@ -79,6 +79,8 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
   diagnostic anchors
 - dispatch anchor function candidates, direct caller/branch ingress, and
   bounded comparison/conditional-branch guards
+- dispatch code-pointer materializations, nearby PAC and registration calls,
+  and authenticated transfers in direct or one-hop tail paths
 
 These results show patchfinder compatibility for the inspected paths. They do
 not provide the unrestricted physical-write primitive required by Dopamine's

@@ -251,6 +251,7 @@ class DispatchMetadataTests(unittest.TestCase):
         image.function_start = lambda address: 0x3000
         image.calls_to = lambda address: [0x2000]
         image.branches_to = lambda address: [0x2000, 0x2010]
+        image.references_to = lambda address: []
         image.window = lambda address, before=6, after=8: [f"window:{address:x}"]
 
         anchors, functions = analyzer._annotate_dispatch_anchors(
@@ -274,6 +275,71 @@ class DispatchMetadataTests(unittest.TestCase):
             ["cmp", "b.hs"],
         )
         self.assertEqual(functions[0]["guards"][1]["branch_target"], 0x3040)
+
+    def test_collects_signed_pointer_registration_context(self):
+        x16 = 16
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(
+                0x1000,
+                analyzer.ARM64_INS_ADR,
+                "adr",
+                [reg(x16), imm(0x3000)],
+            ),
+            instruction(0x1004, 1, "paciza", [reg(x16)], op_str="x16"),
+            instruction(0x1008, 1, "mov", [reg(1), reg(x16)], op_str="x1, x16"),
+            instruction(
+                0x100C,
+                analyzer.ARM64_INS_BL,
+                "bl",
+                [imm(0x2000)],
+                op_str="#0x2000",
+            ),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+        image.references_to = lambda target: [
+            analyzer.Reference(0x1000, target, "adr")
+        ]
+        image.function_start = lambda address: 0x1000
+        image.window = lambda address, before=6, after=8: [f"window:{address:x}"]
+
+        references = analyzer._collect_pointer_references(image, 0x3000)
+
+        self.assertEqual(references[0]["nearby_auth"][0]["mnemonic"], "paciza")
+        self.assertEqual(references[0]["nearby_calls"][0]["target"], 0x2000)
+
+    def test_collects_authenticated_tail_trampoline(self):
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(0x3000, 1, "pacibsp", []),
+            instruction(
+                0x3004,
+                analyzer.ARM64_INS_B,
+                "b",
+                [imm(0x5000)],
+                op_str="#0x5000",
+            ),
+            instruction(0x3100, 1, "pacibsp", []),
+            instruction(0x5000, 1, "bti", [], op_str="c"),
+            instruction(0x5004, 1, "blraaz", [reg(11)], op_str="x11"),
+            instruction(0x5008, 1, "retab", []),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+        image.window = lambda address, before=6, after=8: [f"window:{address:x}"]
+
+        paths = analyzer._collect_authenticated_transfer_paths(image, 0x3000)
+
+        self.assertEqual(paths["tail_trampolines"][0]["target"], 0x5000)
+        self.assertEqual(
+            paths["tail_trampolines"][0]["authenticated_transfers"][0][
+                "mnemonic"
+            ],
+            "blraaz",
+        )
 
 
 if __name__ == "__main__":
