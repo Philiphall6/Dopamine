@@ -337,6 +337,25 @@ GPU memory behavior, MMIO access, or a physical-write primitive.
 These items are research scaffolding. They have not established an end-to-end
 physical-write primitive and must not be interpreted as exploit support.
 
+## Phase 3 Binary and App-Owned Memory Preflight
+
+The next device diagnostic advances one bounded step beyond metadata selection:
+
+- It reads the already packaged ClearSword and DarkSword executables as data.
+- It validates their 64-bit ARM Mach-O headers and load-command bounds, then
+  records `LC_BUILD_VERSION`, linked dylibs, file size, and three static marker
+  strings. It does not load either framework or resolve an entry point.
+- It reads `hw.pagesize`, `hw.cputype`, and `hw.cpusubtype` through `sysctlbyname`.
+- It allocates and immediately deallocates one page in `mach_task_self`. The
+  page is never written, shared, remapped, or exposed to an I/O service.
+- It writes `Documents/a15-ios26-diagnostic-v3.json` with schema
+  `dopamine.a15-ios26.device-diagnostic.v3`.
+
+The phase remains diagnostic-only. It does not create an IOSurface, request a
+PurpleGfxMem mapping, call either exploit, create sockets, issue GPU work, or
+access SPTM/TXM. The integration checker explicitly rejects those calls from
+the diagnostic body. Device observations for this phase are pending.
+
 ## Remaining Hypotheses
 
 - The iOS 26 AGX layout changes represented in the guarded Titan code may be

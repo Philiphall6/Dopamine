@@ -104,13 +104,30 @@ def main() -> int:
         "IOServiceOpen",
         "IOConnectCall",
         "accessibleKernelPath",
+        "IOSurfaceCreate(",
+        "IOSurfacePrefetchPages(",
+        "mach_make_memory_entry_64(",
+        "mach_vm_map(",
+        "vm_write(",
+        "socket(",
+        "pe_init(",
+        "pe_v1(",
+        "pread(",
+        "pwrite(",
     ):
         require(
             forbidden not in diagnostic_body,
             f"research diagnostic unexpectedly references {forbidden}",
         )
     for marker in (
-        '@"schema": @"dopamine.a15-ios26.device-diagnostic.v2"',
+        '@"schema": @"dopamine.a15-ios26.device-diagnostic.v3"',
+        '@"binary_preflight": binaryPreflight',
+        '@"runtime_preflight": runtimePreflight',
+        '@"scope": @"mach_task_self/app-owned-page-only"',
+        'record(@"runtime.app_owned_vm"',
+        'vm_allocate(mach_task_self()',
+        'vm_deallocate(mach_task_self()',
+        '@"memory_written": @NO',
         '@"exploit_matrix": exploitMatrix',
         'record(@"selector.kernel"',
         'record(@"selector.pac"',
@@ -121,7 +138,7 @@ def main() -> int:
         'record(@"titan.command_buffers", @"BLOCKED"',
         'record(@"titan.physical_write", @"NOT_REACHED"',
         'record(@"sptm_txm.runtime_response", @"NOT_REACHED"',
-        'Documents/a15-ios26-diagnostic-v2.json',
+        'Documents/a15-ios26-diagnostic-v3.json',
         '@"asserts_live_sptm_txm_response": @NO',
     ):
         require(marker in diagnostic_body, f"research diagnostic is missing safety marker: {marker}")
@@ -207,7 +224,7 @@ def main() -> int:
 
     print(
         "OK: A15/iOS 26.0.1 remains diagnostic-only; "
-        "IORVBAR mapping validated and Titan execution blocked"
+        "app-owned memory preflight added; IORVBAR mapping validated and Titan execution blocked"
     )
     return 0
 

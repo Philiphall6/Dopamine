@@ -13,6 +13,8 @@
 #import "DOActionMenuButton.h"
 #import "DOUpdateViewController.h"
 #import "DOLogCrashViewController.h"
+#import <mach/mach.h>
+#import <mach-o/loader.h>
 #import <os/log.h>
 #import <pthread.h>
 #import <sys/sysctl.h>
@@ -285,6 +287,135 @@
         NSString *frameworksPath = [bundlePath stringByAppendingPathComponent:@"Frameworks"];
         NSArray<NSString *> *frameworkNames = [[[NSFileManager defaultManager] contentsOfDirectoryAtPath:frameworksPath error:nil]
             sortedArrayUsingSelector:@selector(compare:)];
+        NSString *(^packedVersionString)(uint32_t) = ^NSString *(uint32_t version) {
+            return [NSString stringWithFormat:@"%u.%u.%u", version >> 16, (version >> 8) & 0xff, version & 0xff];
+        };
+        NSMutableArray<NSDictionary *> *binaryPreflight = [NSMutableArray new];
+        for (NSString *frameworkName in @[@"ClearSword.framework", @"DarkSword.framework"]) {
+            NSString *frameworkPath = [frameworksPath stringByAppendingPathComponent:frameworkName];
+            NSDictionary *frameworkInfo = [NSDictionary dictionaryWithContentsOfFile:[frameworkPath stringByAppendingPathComponent:@"Info.plist"]];
+            NSString *executableName = frameworkInfo[@"CFBundleExecutable"] ?: [frameworkName stringByDeletingPathExtension];
+            NSString *executablePath = [frameworkPath stringByAppendingPathComponent:executableName];
+            NSError *binaryError = nil;
+            NSData *binaryData = [NSData dataWithContentsOfFile:executablePath options:NSDataReadingMappedIfSafe error:&binaryError];
+
+            BOOL headerValid = NO;
+            BOOL commandsValid = NO;
+            NSString *minimumOS = @"unknown";
+            NSString *sdkVersion = @"unknown";
+            NSMutableArray<NSString *> *dependencies = [NSMutableArray new];
+            if (binaryData.length >= sizeof(struct mach_header_64)) {
+                struct mach_header_64 header = {0};
+                [binaryData getBytes:&header length:sizeof(header)];
+                NSUInteger commandStart = sizeof(header);
+                NSUInteger commandEnd = commandStart + header.sizeofcmds;
+                headerValid = header.magic == MH_MAGIC_64 && header.cputype == CPU_TYPE_ARM64 && commandEnd <= binaryData.length;
+                commandsValid = headerValid;
+
+                const uint8_t *bytes = binaryData.bytes;
+                NSUInteger commandOffset = commandStart;
+                for (uint32_t index = 0; commandsValid && index < header.ncmds; index++) {
+                    if (commandOffset + sizeof(struct load_command) > commandEnd) {
+                        commandsValid = NO;
+                        break;
+                    }
+
+                    struct load_command loadCommand = {0};
+                    memcpy(&loadCommand, bytes + commandOffset, sizeof(loadCommand));
+                    if (loadCommand.cmdsize < sizeof(loadCommand) || commandOffset + loadCommand.cmdsize > commandEnd) {
+                        commandsValid = NO;
+                        break;
+                    }
+
+                    if (loadCommand.cmd == LC_BUILD_VERSION && loadCommand.cmdsize >= sizeof(struct build_version_command)) {
+                        struct build_version_command buildVersion = {0};
+                        memcpy(&buildVersion, bytes + commandOffset, sizeof(buildVersion));
+                        minimumOS = packedVersionString(buildVersion.minos);
+                        sdkVersion = packedVersionString(buildVersion.sdk);
+                    }
+                    else if ((loadCommand.cmd == LC_LOAD_DYLIB || loadCommand.cmd == LC_LOAD_WEAK_DYLIB || loadCommand.cmd == LC_REEXPORT_DYLIB) &&
+                             loadCommand.cmdsize >= sizeof(struct dylib_command)) {
+                        struct dylib_command dylibCommand = {0};
+                        memcpy(&dylibCommand, bytes + commandOffset, sizeof(dylibCommand));
+                        NSUInteger nameStart = commandOffset + dylibCommand.dylib.name.offset;
+                        NSUInteger nameEnd = commandOffset + loadCommand.cmdsize;
+                        if (nameStart < nameEnd) {
+                            NSUInteger terminator = nameStart;
+                            while (terminator < nameEnd && bytes[terminator] != 0) terminator++;
+                            NSString *dependency = [[NSString alloc] initWithBytes:bytes + nameStart
+                                                                           length:terminator - nameStart
+                                                                         encoding:NSUTF8StringEncoding];
+                            if (dependency.length > 0) [dependencies addObject:dependency];
+                        }
+                    }
+                    commandOffset += loadCommand.cmdsize;
+                }
+                if (commandsValid && commandOffset != commandEnd) commandsValid = NO;
+            }
+
+            NSArray<NSString *> *markerNames = @[@"IOSurfacePrefetchPages", @"mach_make_memory_entry_64", @"PurpleGfxMem"];
+            NSMutableDictionary<NSString *, NSNumber *> *markers = [NSMutableDictionary new];
+            for (NSString *markerName in markerNames) {
+                NSData *markerData = [markerName dataUsingEncoding:NSUTF8StringEncoding];
+                BOOL present = binaryData != nil && [binaryData rangeOfData:markerData
+                                                                    options:0
+                                                                      range:NSMakeRange(0, binaryData.length)].location != NSNotFound;
+                markers[markerName] = @(present);
+            }
+
+            NSDictionary *entry = @{
+                @"framework": [frameworkName stringByDeletingPathExtension],
+                @"present": @(binaryData != nil),
+                @"size": @(binaryData.length),
+                @"mach_o_arm64": @(headerValid),
+                @"load_commands_valid": @(commandsValid),
+                @"minimum_os": minimumOS,
+                @"sdk": sdkVersion,
+                @"dependencies": dependencies,
+                @"static_markers": markers,
+                @"error": binaryError.localizedDescription ?: @"none",
+            };
+            [binaryPreflight addObject:entry];
+            record([NSString stringWithFormat:@"framework.%@.binary", [frameworkName stringByDeletingPathExtension].lowercaseString],
+                   headerValid && commandsValid ? @"INSPECTED" : @"INVALID",
+                   [NSString stringWithFormat:@"bytes=%lu minos=%@ dependencies=%lu loaded=false",
+                    (unsigned long)binaryData.length, minimumOS, (unsigned long)dependencies.count]);
+        }
+
+        uint32_t hardwarePageSize = 0;
+        size_t hardwarePageSizeLength = sizeof(hardwarePageSize);
+        int pageSizeStatus = sysctlbyname("hw.pagesize", &hardwarePageSize, &hardwarePageSizeLength, NULL, 0);
+        cpu_type_t hardwareCPUType = 0;
+        size_t hardwareCPUTypeLength = sizeof(hardwareCPUType);
+        int cpuTypeStatus = sysctlbyname("hw.cputype", &hardwareCPUType, &hardwareCPUTypeLength, NULL, 0);
+        cpu_subtype_t hardwareCPUSubtype = 0;
+        size_t hardwareCPUSubtypeLength = sizeof(hardwareCPUSubtype);
+        int cpuSubtypeStatus = sysctlbyname("hw.cpusubtype", &hardwareCPUSubtype, &hardwareCPUSubtypeLength, NULL, 0);
+
+        vm_address_t appOwnedAddress = 0;
+        vm_size_t appOwnedSize = vm_page_size;
+        kern_return_t allocationStatus = vm_allocate(mach_task_self(), &appOwnedAddress, appOwnedSize, VM_FLAGS_ANYWHERE);
+        kern_return_t deallocationStatus = allocationStatus == KERN_SUCCESS
+            ? vm_deallocate(mach_task_self(), appOwnedAddress, appOwnedSize)
+            : KERN_FAILURE;
+        BOOL appOwnedVMComplete = allocationStatus == KERN_SUCCESS && deallocationStatus == KERN_SUCCESS;
+        NSDictionary *runtimePreflight = @{
+            @"scope": @"mach_task_self/app-owned-page-only",
+            @"vm_page_size": @(vm_page_size),
+            @"hw_pagesize": @(hardwarePageSize),
+            @"hw_pagesize_status": @(pageSizeStatus),
+            @"hw_cputype": @(hardwareCPUType),
+            @"hw_cputype_status": @(cpuTypeStatus),
+            @"hw_cpusubtype": @(hardwareCPUSubtype),
+            @"hw_cpusubtype_status": @(cpuSubtypeStatus),
+            @"allocation_status": @(allocationStatus),
+            @"deallocation_status": @(deallocationStatus),
+            @"memory_written": @NO,
+        };
+        record(@"runtime.app_owned_vm", appOwnedVMComplete ? @"PASS" : @"FAIL",
+               [NSString stringWithFormat:@"bytes=%lu allocate=%d deallocate=%d memory-written=false",
+                (unsigned long)appOwnedSize, allocationStatus, deallocationStatus]);
+
         NSMutableArray<NSDictionary *> *exploitMatrix = [NSMutableArray new];
         NSMutableDictionary<NSString *, NSNumber *> *candidateCounts = [@{@"Kernel": @0, @"PAC": @0, @"PPL": @0} mutableCopy];
         NSMutableDictionary<NSString *, NSNumber *> *availableCounts = [@{@"Kernel": @0, @"PAC": @0, @"PPL": @0} mutableCopy];
@@ -374,7 +505,7 @@
         record(@"sptm_txm.runtime_response", @"NOT_REACHED", @"no-protected-component-request-issued");
 
         NSDictionary *report = @{
-            @"schema": @"dopamine.a15-ios26.device-diagnostic.v2",
+            @"schema": @"dopamine.a15-ios26.device-diagnostic.v3",
             @"diagnostic_only": @YES,
             @"asserts_live_sptm_txm_response": @NO,
             @"target": @{
@@ -384,6 +515,8 @@
                 @"build": @"23A355",
             },
             @"txm_static_base": @"0xfffffff017004000",
+            @"binary_preflight": binaryPreflight,
+            @"runtime_preflight": runtimePreflight,
             @"exploit_matrix": exploitMatrix,
             @"selector_counts": @{
                 @"candidates": candidateCounts,
@@ -394,10 +527,10 @@
 
         NSError *jsonError = nil;
         NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:&jsonError];
-        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v2.json"];
+        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v3.json"];
         BOOL wroteReport = json != nil && [json writeToFile:outputPath options:NSDataWritingAtomic error:&jsonError];
         [self emitResearchDiagnosticEvent:wroteReport
-            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v2.json"
+            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v3.json"
             : [NSString stringWithFormat:@"checkpoint=report.write status=FAIL error=%@", jsonError.localizedDescription ?: @"unknown"]];
 
         dispatch_async(dispatch_get_main_queue(), ^{
