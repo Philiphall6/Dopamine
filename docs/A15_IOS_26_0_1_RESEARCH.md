@@ -315,6 +315,13 @@ The complete iOS 17 mechanism, including the MDSID write primitive, AGX
 hibernation transition, self-referencing AP PTE, patch boundaries, and direct
 mapping to the 23A355 trace, is reconstructed in
 [Titan iOS 17 SPTM Bypass: Source-Level Reconstruction](TITAN_IOS17_SPTM_BYPASS_DEEP_DIVE.md).
+The 23A355 follow-up now identifies legitimate saved-state signing routines
+and a separate UPPL/MMU mapping surface in the exact GFX firmware. These are
+replacement-path candidates, not bypasses: controllable signer inputs,
+dispatcher reachability, context-ID authorization, and micro-PPL validation
+remain unproven. `compare_gfx_security.py` applies an identical TTBR/PACGA/ERET
+census to historical GFX payloads so the 17.4 and 18.1 hardening boundaries can
+be measured symmetrically.
 
 ## Diagnostic Response Logging
 

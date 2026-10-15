@@ -10,7 +10,10 @@ The app also contains a separate, exact-target active Titan probe for
 
 `analyze_titan.py` separately reproduces the masked instruction searches in
 Titan's kernel and GFX patchfinders. It understands the `rkosftab` container
-used by extracted GFX firmware and checks every embedded firmware slice.
+used by extracted GFX firmware and checks every embedded firmware slice. Its
+GFX report also inventories all static `MSR TTBR0_EL1`/`MSR TTBR1_EL1`,
+`PACGA`, and `ERET` sites. PACGA-chain labels are bounded local heuristics;
+they do not establish a signing oracle or a bypass.
 
 `analyze_vtable_fields.py` decodes authenticated chained vtable entries in an
 offline kernelcache and reports accesses to selected object-field offsets.
@@ -39,6 +42,16 @@ python tools/a15_ios26/analyze_titan.py \
   --live-layout tools/a15_ios26/live-layout-iphone14_2-23A355.json \
   --output titan-static-report.md \
   --json-output titan-static-report.json
+
+python tools/a15_ios26/compare_gfx_security.py \
+  --image 21D61=gfx-21D61.bin \
+  --image 21E5200d=gfx-21E5200d.bin \
+  --image 21E5209b=gfx-21E5209b.bin \
+  --image 22A3354=gfx-22A3354.bin \
+  --image 22B5045g=gfx-22B5045g.bin \
+  --image 23A355=gfx-23A355.bin \
+  --output gfx-security-comparison.md \
+  --json-output gfx-security-comparison.json
 
 python tools/a15_ios26/build_response_trace.py \
   --titan-report titan-static-report.json \

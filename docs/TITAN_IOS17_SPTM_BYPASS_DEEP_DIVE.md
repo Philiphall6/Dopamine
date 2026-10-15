@@ -270,6 +270,35 @@ These are independent barriers. Fixing the iOS 26 IPC-table decoder would
 only reach the first command-buffer boundary. It would not restore the iOS 17
 hibernation behavior or remove AGX instruction PAC.
 
+### Symmetric GFX build differential
+
+The Apple GFX payloads for iPhone14,2 were extracted directly from the IPSWs
+for 17.3.1 (`21D61`), 17.4 beta 3 (`21E5200d`), 17.4 beta 4 (`21E5209b`),
+18.0 (`22A3354`), 18.1 beta 4 (`22B5045g`), and 26.0.1 (`23A355`). Every
+image was processed by the same instruction census.
+
+| Build | TTBR0 writes | TTBR1 writes | PACGA chains | Resume behavior |
+|---|---:|---:|---:|---|
+| `21D61` | 5 | 4 | 0 | Restores hibernation `TTBR0`/`TTBR1` from `X29`/`X30` |
+| `21E5200d` | 5 | 4 | 0 | Restores hibernation `TTBR0`/`TTBR1` from `X29`/`X30` |
+| `21E5209b` | 4 | 3 | 0 | The mutable pair is gone; a helper-derived `X0` is written to `TTBR1` |
+| `22A3354` | 4 | 3 | 0 | Fixed/helper-derived resume root; no decoded PACGA chain |
+| `22B5045g` | 4 | 3 | 7 | Four signature-storage and three comparison-guard candidates |
+| `23A355` | 4 | 3 | 7 | Fixed/helper-derived resume root plus authenticated saved-state paths |
+
+Counts are identical in the two packaged firmware slices for each build. The
+beta 3/beta 4 delta is direct: beta 3 executes `MSR TTBR0_EL1, X29` followed by
+`MSR TTBR1_EL1, X30`; beta 4 removes both and instead calls a helper before
+`MSR TTBR1_EL1, X0`. This confirms the published 17.4 beta 4 patch boundary on
+the exact A15 device family. None of these iOS 17 payloads contains a decoded
+PACGA chain. iOS 18.1 beta 3 (`22B5034e`) was not distributed for
+`iPhone14,2`, so it cannot provide a same-device A15 baseline. The exact
+same-device transition is instead 18.0 `22A3354` from September 16, 2024 to
+18.1 beta 4 `22B5045g` from September 17: the census changes from zero to seven
+PACGA chains per slice while the TTBR counts remain 4/3. The same four local
+signature-storage and three comparison-guard candidates remain present in
+23A355.
+
 ### Independent 23A355 confirmation
 
 The two AGX hardening changes are visible in this project's exact iOS 26.0.1
@@ -311,6 +340,72 @@ continuity, not evidence that Titan's original control-flow or TTBR1
 substitution remains exploitable. The local static analyzer's adapted `PASS`
 means that structural anchors were found; it does not override these two
 hardening checks.
+
+### 23A355 replacement-path candidates
+
+The same exact firmware contains two families of routines that are relevant to
+the missing replacement primitives. Their presence narrows the investigation,
+but does not establish that either interface is attacker-reachable.
+
+First, 23A355 contains both PACGA signature producers and consumers. The named
+routine `__rtk_sign_initial_thread_state` at `0xffffff8000001668` prepares a
+new thread context with a fixed firmware entry point, an EL-derived value, and
+zeroed remaining signature inputs. It then reaches a helper at
+`0xffffff8000001610` that chains five `PACGA` operations and stores the result
+at context offset `0x340`. The observed initialization caller at
+`0xffffff8000036acc` supplies a firmware-owned context and selects EL1 or EL2.
+This is a legitimate signer, but it is not yet a signing oracle: the static
+path constrains the program counter and other signed fields, and no interface
+that signs arbitrary caller-controlled state has been established.
+
+The exception and hibernation vectors contain additional producer/consumer
+pairs. Signature-producing chains start at `0xffffff8000001c20`,
+`0xffffff8000001e10`, and `0xffffff80000023dc`; guarded comparison chains start
+at `0xffffff8000001d64`, `0xffffff8000001f24`, and
+`0xffffff80000024d8`. This creates concrete targets for checking a possible
+time-of-check/time-of-use gap or replay boundary. It does not by itself show
+that a signed state can be changed after signing, transplanted to another
+context, or replayed across reset.
+
+Second, 23A355 exposes a separate MMU management surface:
+
+- `__rtk_mmu_switch_region_base_by_contextID`
+- `__rtk_mmu_map`
+- `__rtk_mmu_unmap`
+- `__rtk_mmu_update_mapping`
+- `__rtk_mmu_switch_region_base`
+- `__rtk_mmu_gxf_dispatcher_entry`
+- `__rtk_uppl_client_dispatcher`
+
+`__rtk_mmu_switch_region_base` at `0xffffff8000049170` accepts a region
+selector, a translation-table base, and a TCR-size value. It writes the table
+base to `TTBR0_EL1` or `TTBR1_EL1` and updates `TCR_EL1`. Its context-ID wrapper
+resolves a registered table base before calling it. The UPPL dispatcher loads a
+handler from a firmware table and transfers through authenticated `BRAAZ`.
+These routines prove that legitimate mapping authority exists independently of
+the fixed hibernation-resume root. The unresolved questions are whether the
+host can reach the relevant dispatcher entries, how context IDs and physical
+ranges are validated, and whether micro-PPL restricts the resulting mappings.
+The direct caller of the UPPL dispatcher is the protected
+`__rtk_mmu_gxf_dispatcher_entry`; the same image exposes boot-time patch fields
+named `uat_gptbat_base`, `uat_gptbat_size`, `uat_ppl_shared_base`, and
+`uat_ppl_shared_l2_phys`. This localizes the likely authorization boundary to
+the GXF/UPPL request path and its PPL-shared ranges.
+
+Public UAT implementations reinforce that boundary. AGX normally maps pages
+backing validated GPU objects into one of multiple UAT contexts, with a shared
+firmware region and an explicit AP/firmware handoff around table updates and
+TLB invalidation. XNU's SPTM pmap data also records IOMMU ownership and mapping
+state for physical pages. The useful research predicate is therefore narrower
+than "can AGX write memory": it is whether the UPPL/UAT path can be made to
+accept an AP/SPTM-owned page as a GPU-writable destination without an
+authorized type transition. DART is a secondary path because it would still
+require a controllable DMA endpoint and acceptance of the same protected page.
+
+The offline analyzer now inventories every TTBR write, PACGA chain, ERET site,
+and named signing/MMU candidate in each GFX slice. The companion symmetric
+comparator applies the same census to every historical build so that changes
+between 17.4 beta 3, 17.4 beta 4, and 23A355 are measured rather than inferred.
 
 ## Mapping to the Current iPhone14,2 / 23A355 Trace
 
@@ -357,5 +452,13 @@ those three replacement primitives.
 - [Titan `titan.c`](https://github.com/alfiecg24/Titan/blob/main/src/titan.c)
 - [Titan `gfx.c`](https://github.com/alfiecg24/Titan/blob/main/src/gfx.c)
 - [Coruna/Rocket deep dive](https://littlelailo.github.io/writeups/coruna.html)
+- [Asahi Linux AGX architecture notes](https://asahilinux.org/docs/hw/soc/agx/)
+- [m1n1 UAT implementation](https://github.com/AsahiLinux/m1n1/blob/main/proxyclient/m1n1/hw/uat.py)
+- [m1n1 AGX handoff implementation](https://github.com/AsahiLinux/m1n1/blob/main/proxyclient/m1n1/fw/agx/handoff.py)
+- [XNU SPTM pmap/IOMMU metadata](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/arm64/sptm/pmap/pmap_data.h)
+- [Modern iOS Security Features: SPTM, TXM, and Exclaves](https://arxiv.org/abs/2510.09272)
+- [AppleDB metadata for 18.1 beta 3 build 22B5034e](https://api.appledb.dev/ios/iOS%3B22B5034e.json)
+- [The Apple Wiki iOS 18 beta firmware history](https://theapplewiki.com/wiki/Beta_Firmware/iPhone/18.x)
+- [Apple XNU saved-thread PAC implementation](https://github.com/apple-oss-distributions/xnu/blob/main/osfmk/arm64/machine_routines_asm.s)
 - [Same-device iOS 17/iOS 26 static comparison](SPTM_IOS17_IOS26_STATIC_COMPARISON.md)
 - [A15 iOS 17.1.1 symmetric baseline](A15_IOS17_1_1_SYMMETRIC_BASELINE.md)

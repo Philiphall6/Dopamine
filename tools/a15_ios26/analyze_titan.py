@@ -19,6 +19,11 @@ try:
 except ImportError as exc:  # pragma: no cover - host dependency
     raise SystemExit("Install LIEF first: python -m pip install lief") from exc
 
+try:
+    import capstone
+except ImportError as exc:  # pragma: no cover - host dependency
+    raise SystemExit("Install Capstone first: python -m pip install capstone") from exc
+
 lief.logging.disable()
 
 MACHO64_MAGIC = 0xFEEDFACF
@@ -920,6 +925,150 @@ def analyze_static_rtkit_marker(image: MappedImage) -> dict:
     }
 
 
+def disassemble_gfx_text(image: MappedImage) -> list[dict]:
+    """Return a compact, JSON-safe disassembly of the GFX text segment."""
+    text = image.segment("__TEXT")
+    disassembler = capstone.Cs(
+        capstone.CS_ARCH_ARM64,
+        capstone.CS_MODE_LITTLE_ENDIAN,
+    )
+    # Apple firmware may contain opcodes unknown to the host Capstone build.
+    # Skipping them keeps later, independently decodable instructions visible.
+    disassembler.skipdata = True
+    return [
+        {
+            "address": int(instruction.address),
+            "size": int(instruction.size),
+            "mnemonic": instruction.mnemonic,
+            "op_str": instruction.op_str,
+        }
+        for instruction in disassembler.disasm(text.content, text.vmaddr)
+    ]
+
+
+def instruction_text(instruction: dict) -> str:
+    operands = f" {instruction['op_str']}" if instruction["op_str"] else ""
+    return f"0x{instruction['address']:x}: {instruction['mnemonic']}{operands}"
+
+
+def instruction_window(
+    instructions: list[dict],
+    address: int,
+    before: int = 6,
+    after: int = 4,
+) -> list[str]:
+    index = next(
+        (index for index, item in enumerate(instructions) if item["address"] == address),
+        None,
+    )
+    if index is None:
+        return []
+    start = max(0, index - before)
+    end = min(len(instructions), index + after + 1)
+    return [instruction_text(item) for item in instructions[start:end]]
+
+
+def classify_pacga_chain(following: list[dict]) -> str:
+    mnemonics = [item["mnemonic"] for item in following]
+    has_comparison = any(
+        mnemonic in {"cmp", "cmn", "subs"} for mnemonic in mnemonics
+    )
+    has_conditional_branch = any(
+        mnemonic.startswith("b.") or mnemonic in {"cbz", "cbnz", "tbz", "tbnz"}
+        for mnemonic in mnemonics
+    )
+    if has_comparison and has_conditional_branch:
+        return "comparison_guard_candidate"
+    if any(mnemonic in {"str", "stur", "stp"} for mnemonic in mnemonics):
+        return "signature_storage_candidate"
+    return "unclassified"
+
+
+def analyze_gfx_security_controls(image: MappedImage) -> dict:
+    """Inventory TTBR writes and authenticated saved-state controls.
+
+    This is deliberately descriptive. A PACGA site, register write, or nearby
+    branch is not treated as proof of a signing oracle or a bypass.
+    """
+    instructions = disassemble_gfx_text(image)
+    ttbr_writes = []
+    eret_sites = []
+    pacga_indexes = []
+
+    for index, instruction in enumerate(instructions):
+        mnemonic = instruction["mnemonic"]
+        operands = instruction["op_str"].lower()
+        if mnemonic == "msr" and (
+            operands.startswith("ttbr0_el1,") or operands.startswith("ttbr1_el1,")
+        ):
+            register, source = [part.strip() for part in operands.split(",", 1)]
+            ttbr_writes.append(
+                {
+                    "address": instruction["address"],
+                    "register": register,
+                    "source_register": source,
+                    "context": instruction_window(instructions, instruction["address"]),
+                }
+            )
+        elif mnemonic == "eret":
+            eret_sites.append(
+                {
+                    "address": instruction["address"],
+                    "context": instruction_window(
+                        instructions,
+                        instruction["address"],
+                        before=8,
+                        after=1,
+                    ),
+                }
+            )
+        elif mnemonic == "pacga":
+            pacga_indexes.append(index)
+
+    pacga_chains = []
+    cursor = 0
+    while cursor < len(pacga_indexes):
+        indexes = [pacga_indexes[cursor]]
+        cursor += 1
+        while (
+            cursor < len(pacga_indexes)
+            and instructions[pacga_indexes[cursor]]["address"]
+            == instructions[indexes[-1]]["address"] + 4
+        ):
+            indexes.append(pacga_indexes[cursor])
+            cursor += 1
+
+        first = indexes[0]
+        last = indexes[-1]
+        following = instructions[last + 1 : last + 9]
+        pacga_chains.append(
+            {
+                "start": instructions[first]["address"],
+                "end": instructions[last]["address"],
+                "length": len(indexes),
+                "classification": classify_pacga_chain(following),
+                "instructions": [instruction_text(instructions[index]) for index in indexes],
+                "following": [instruction_text(item) for item in following],
+            }
+        )
+
+    return {
+        "status": (
+            "HARDENED_CONTROLS_PRESENT"
+            if ttbr_writes and pacga_chains
+            else "PARTIAL_OR_NOT_OBSERVED"
+        ),
+        "ttbr_writes": ttbr_writes,
+        "pacga_chains": pacga_chains,
+        "eret_sites": eret_sites,
+        "limitations": (
+            "Static census only. Candidate classifications are local control-flow "
+            "heuristics and do not establish a reachable signing oracle, mutable "
+            "translation root, or bypass."
+        ),
+    }
+
+
 def analyze_gfx(path: pathlib.Path) -> dict:
     slices = []
     for image in parse_gfx_images(path):
@@ -966,6 +1115,7 @@ def analyze_gfx(path: pathlib.Path) -> dict:
                 "checks": checks,
                 "ios26_hibernate_candidate": ios26_candidate,
                 "rtkit_marker_scope": analyze_static_rtkit_marker(image),
+                "security_controls": analyze_gfx_security_controls(image),
                 "ios26_symbol_candidates": {
                     name: image.symbols[name]
                     for name in (
@@ -974,6 +1124,25 @@ def analyze_gfx(path: pathlib.Path) -> dict:
                         "__fp_context",
                         "_arm_hb_context",
                         "_arm_fp_context",
+                    )
+                    if name in image.symbols
+                },
+                "security_symbol_candidates": {
+                    name: image.symbols[name]
+                    for name in (
+                        "__rtk_sign_initial_thread_state",
+                        "__rtk_mmu_gxf_dispatcher_entry",
+                        "__rtk_uppl_client_dispatcher",
+                        "__rtk_uppl_client_dispatch",
+                        "__rtk_mmu_switch_region_base_by_contextID",
+                        "__rtk_mmu_map",
+                        "__rtk_mmu_unmap",
+                        "__rtk_mmu_update_mapping",
+                        "__rtk_mmu_switch_region_base",
+                        "__rtk_patch_uat_gptbat_base",
+                        "__rtk_patch_uat_gptbat_size",
+                        "__rtk_patch_uat_ppl_shared_base",
+                        "__rtk_patch_uat_ppl_shared_l2_phys",
                     )
                     if name in image.symbols
                 },
@@ -1230,6 +1399,62 @@ def render_markdown(report: dict) -> str:
         )
         if candidate.get("derived"):
             lines.append(format_derived(candidate["derived"]))
+        controls = item["security_controls"]
+        lines.extend(
+            [
+                "",
+                "### Translation and authenticated-state controls",
+                "",
+                f"Status: **{controls['status']}**. {controls['limitations']}",
+                "",
+                "| TTBR write | Source |",
+                "|---|---|",
+            ]
+        )
+        for write in controls["ttbr_writes"]:
+            lines.append(
+                f"| `{write['register']}` at `{hex_value(write['address'])}` | "
+                f"`{write['source_register']}` |"
+            )
+        if not controls["ttbr_writes"]:
+            lines.append("| none observed | - |")
+        lines.extend(
+            [
+                "",
+                "| PACGA chain | Length | Local classification |",
+                "|---|---:|---|",
+            ]
+        )
+        for chain in controls["pacga_chains"]:
+            lines.append(
+                f"| `{hex_value(chain['start'])}`..`{hex_value(chain['end'])}` | "
+                f"{chain['length']} | `{chain['classification']}` |"
+            )
+        if not controls["pacga_chains"]:
+            lines.append("| none observed | 0 | - |")
+        lines.append("")
+        lines.append(
+            "Exception-return sites: "
+            + (
+                ", ".join(
+                    f"`{hex_value(site['address'])}`"
+                    for site in controls["eret_sites"]
+                )
+                or "none observed"
+            )
+            + "."
+        )
+        if item["security_symbol_candidates"]:
+            symbols = ", ".join(
+                f"`{name}`={hex_value(value)}"
+                for name, value in item["security_symbol_candidates"].items()
+            )
+            lines.extend(
+                [
+                    "",
+                    "Named signing/MMU candidates (presence only): " + symbols,
+                ]
+            )
         if item["ios26_symbol_candidates"]:
             symbols = ", ".join(
                 f"`{name}`={hex_value(value)}"
