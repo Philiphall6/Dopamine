@@ -254,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_LAYOUT_SOURCE_READY" in report,
-        "report does not record the bounded IPC layout state",
+        "ACTIVE_TITAN_PROBE_IPC_LAYOUT_BUILT" in report,
+        "report does not record the verified bounded IPC layout build state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")

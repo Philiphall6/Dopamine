@@ -12,28 +12,29 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_LAYOUT_SOURCE_READY`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_LAYOUT_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `8beefad`
-- GitHub Actions run: `38752695837` (`PASS`, 10m 46s)
-- IPA: `Dopamine-A15-iOS26-ipc-census-8beefad.ipa`
-- Size: `55,471,939` bytes
-- SHA-256: `38CF50CBAE156C9726422F9D9912F0D558FC931A62A646368DE830C858ED6699`
+- Source commit: `b66873ef092462a6250ff3a33bd4184515fdf26c`
+- GitHub Actions run: `38756624466` (`PASS`, 12m 56s)
+- IPA: `Dopamine-A15-iOS26-ipc-layout-b66873e.ipa`
+- Size: `55,472,936` bytes
+- SHA-256: `FBFE8FC027BF243C5D5AE1FDD76A7CF13AFA7E891BF6F32191A07F99B89EF08B`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
-  `Frameworks/Titan.framework/Titan` are present.
+  `Frameworks/Titan.framework/Titan` and
+  `Frameworks/ClearSword.framework/ClearSword` are present.
 
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
 packaged Titan binary contains all nine exact-read checkpoints for the map and
-descriptor fields, the bounded process-name discovery, and the complete IPC
-census marker set: `START`, `TYPE`, `CANDIDATE`, `SUMMARY`, and `STOP`. It also
-contains the explicit `task_copy_ipc_entry not reached` stop marker. The
-`a720b8a` process-lookup build passed its intended lookup checks on-device;
-`8beefad` packages the resulting read-only IPC census. Its first device run is
-recorded below; the follow-up source adds a bounded word-layout probe for the
-newly isolated `ipc_space` failure.
+descriptor fields, the bounded process-name discovery, the IPC census markers,
+and the new `titan.ipc-layout START`, `WORD`, and read-only `STOP` markers. It
+also contains the raw table-word marker and the explicit
+`task_copy_ipc_entry not reached` stop marker. The `8beefad` device run isolated
+the `ipc_space` layout failure; `b66873e` packages the bounded symmetric
+task/IPC-space word probe needed to distinguish an offset change from an SMR
+decoding change.
 
 ## First Active Device Result
 
@@ -987,8 +988,8 @@ Consequences:
 
 ## Next Steps
 
-1. Build the bounded IPC-layout revision and verify its packaged marker set.
-2. Run it once on the exact target and recover the `titan.ipc-layout START`,
+1. Install and run the verified bounded IPC-layout IPA once on the exact target.
+2. Recover the `titan.ipc-layout START`,
    `WORD`, and `STOP` records.
 3. Compare target and self task/IPC-space windows offline before selecting any
    replacement offset or decoder.
