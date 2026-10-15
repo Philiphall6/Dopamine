@@ -161,6 +161,25 @@ loading, `IOServiceOpen`, `IOConnectCall`, kernel read/write, command-buffer
 setup, or physical-write functions. Titan execution and live SPTM/TXM requests
 therefore remain blocked.
 
+The phase 2 diagnostic completed on the USB-connected target on 2026-10-15.
+Its 17 checkpoints and 11 framework/flavor entries were pulled as
+`a15-ios26-diagnostic-v2-device-20261015.json`, with SHA-256
+`0B51294D28BA37D09FFC0EBEFF529A5BDDD5F0ACC01EDCF1B95217F84FB5C1B0`.
+The device result matches the offline model:
+
+- Kernel metadata: 7 candidates, with ClearSword and DarkSword as the 2 range
+  matches. These remain metadata candidates only; runtime kernel R/W is
+  `MISSING`.
+- PAC metadata: 1 candidate, 0 matches, and the stage is `NOT_REQUIRED` on this
+  target.
+- PPL metadata: 3 candidates and 0 matches. Titan and dmaFail miss the version
+  range; momentarius misses the declared device family.
+- The overall selector result is `BLOCKED` with `ppl-bypass-missing`.
+- Local kernelcache, SPTM, and TXM artifacts are all `MISSING` from the app
+  bundle and Documents directory.
+- Titan command buffers stay `BLOCKED`; physical write and live SPTM/TXM
+  response stay `NOT_REACHED`.
+
 The packaged Titan framework still declares support only for iOS `16.1` through
 `17.3.1`. Its Info.plist and Mach-O `LC_BUILD_VERSION` both now declare a
 minimum deployment target of iOS `16.1`. Although its historical device-family list contains A15, the exact
