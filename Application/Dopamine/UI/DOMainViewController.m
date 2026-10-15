@@ -8,6 +8,7 @@
 #import "DOMainViewController.h"
 #import "DOUIManager.h"
 #import "DOEnvironmentManager.h"
+#import "DOExploitManager.h"
 #import "DOJailbreaker.h"
 #import "DOGlobalAppearance.h"
 #import "DOActionMenuButton.h"
@@ -266,8 +267,10 @@
             @"sptm.static_artifact": @[@"sptm.img4", @"sptm.im4p"],
             @"txm.static_artifact": @[@"txm.img4", @"txm.im4p"],
         };
+        NSMutableDictionary<NSString *, id> *artifactLocations = [NSMutableDictionary new];
         [artifactNames enumerateKeysAndObjectsUsingBlock:^(NSString *checkpoint, NSArray<NSString *> *names, BOOL *stop) {
             NSString *location = artifactLocation(names);
+            artifactLocations[checkpoint] = location ?: [NSNull null];
             record(checkpoint, location ? @"AVAILABLE" : @"MISSING", location ?: @"not-packaged-or-in-Documents");
         }];
 
@@ -567,13 +570,77 @@
             (pplRequired && availableCounts[@"PPL"].unsignedIntegerValue == 0 ? @"ppl-bypass-missing" : @"none");
         record(@"selector.overall", [selectorBlocker isEqualToString:@"none"] ? @"METADATA_CHAIN_COMPLETE" : @"BLOCKED", selectorBlocker);
 
+        DOExploitManager *exploitManager = [DOExploitManager sharedManager];
+        DOExploit *selectedKernelExploit = exploitManager.selectedKernelExploit;
+        DOExploit *selectedPACBypass = exploitManager.selectedPACBypass;
+        DOExploit *selectedPPLBypass = exploitManager.selectedPPLBypass;
+        BOOL staticInputsPresent = artifactLocations[@"kernel.static_artifact"] != [NSNull null] &&
+            artifactLocations[@"sptm.static_artifact"] != [NSNull null] &&
+            artifactLocations[@"txm.static_artifact"] != [NSNull null];
+        NSString *firstProvenBlocker = !selectedKernelExploit ? @"selector.kernel_metadata" :
+            (pacRequired && !selectedPACBypass ? @"selector.pac_metadata" :
+            (pplRequired && !selectedPPLBypass ? @"selector.ppl_metadata" : @"none"));
+
+        NSMutableArray<NSDictionary *> *jailbreakDryRunStages = [NSMutableArray new];
+        void (^recordDryRun)(NSString *, NSString *, NSString *) = ^(NSString *stage, NSString *status, NSString *evidence) {
+            [jailbreakDryRunStages addObject:@{
+                @"stage": stage,
+                @"status": status,
+                @"evidence": evidence,
+            }];
+            record([@"jailbreak_dry_run." stringByAppendingString:stage], status, evidence);
+        };
+        recordDryRun(@"entry", @"PASS", @"research-target-gate");
+        recordDryRun(@"gather_system_information",
+                     staticInputsPresent ? @"PRECONDITION_READY" : @"UNRESOLVED",
+                     staticInputsPresent ? @"all-static-inputs-present" : @"not-invoked-no-download-no-xpf");
+        recordDryRun(@"kernel_selection",
+                     selectedKernelExploit ? @"METADATA_SELECTED" : @"BLOCKED",
+                     selectedKernelExploit ? selectedKernelExploit.displayName : @"none");
+        recordDryRun(@"pac_selection",
+                     pacRequired ? (selectedPACBypass ? @"METADATA_SELECTED" : @"BLOCKED") : @"NOT_REQUIRED",
+                     selectedPACBypass ? selectedPACBypass.displayName : @"none");
+        recordDryRun(@"ppl_selection",
+                     pplRequired ? (selectedPPLBypass ? @"METADATA_SELECTED" : @"BLOCKED") : @"NOT_REQUIRED",
+                     selectedPPLBypass ? selectedPPLBypass.displayName : @"none");
+        recordDryRun(@"exploit_load", @"NOT_EXECUTED", @"no-dlopen-no-entrypoint");
+        recordDryRun(@"exploit_run", @"NOT_EXECUTED", @"no-exploit-init");
+        recordDryRun(@"physrw", @"NOT_REACHED", @"no-runtime-kernel-primitive");
+        recordDryRun(@"privilege_elevation", @"NOT_REACHED", @"no-kernel-write");
+        recordDryRun(@"bootstrap", @"NOT_REACHED", @"no-unsandbox-no-trustcache-change");
+        recordDryRun(@"protected_component", @"NOT_REACHED", @"no-sptm-txm-request");
+
+        NSDictionary *jailbreakDryRun = @{
+            @"mode": @"selection-and-precondition-trace-only",
+            @"actual_entrypoint_called": @NO,
+            @"gather_system_information_called": @NO,
+            @"xpf_started": @NO,
+            @"image_download_attempted": @NO,
+            @"exploit_framework_loaded": @NO,
+            @"exploit_entrypoint_called": @NO,
+            @"kernel_primitive_created": @NO,
+            @"physrw_created": @NO,
+            @"privileges_modified": @NO,
+            @"bootstrap_modified": @NO,
+            @"protected_request_issued": @NO,
+            @"first_proven_blocker": firstProvenBlocker,
+            @"earliest_unexecuted_stage": @"gather_system_information",
+            @"static_inputs_present": @(staticInputsPresent),
+            @"selected": @{
+                @"kernel": selectedKernelExploit.displayName ?: [NSNull null],
+                @"pac": selectedPACBypass.displayName ?: [NSNull null],
+                @"ppl": selectedPPLBypass.displayName ?: [NSNull null],
+            },
+            @"stages": jailbreakDryRunStages,
+        };
+
         record(@"kernel.runtime_read_write", @"MISSING", @"metadata-candidate-only-no-verified-runtime-primitive");
         record(@"titan.command_buffers", @"BLOCKED", @"diagnostic-mode");
         record(@"titan.physical_write", @"NOT_REACHED", @"physwritebuf-not-published");
         record(@"sptm_txm.runtime_response", @"NOT_REACHED", @"no-protected-component-request-issued");
 
         NSDictionary *report = @{
-            @"schema": @"dopamine.a15-ios26.device-diagnostic.v5",
+            @"schema": @"dopamine.a15-ios26.device-diagnostic.v6",
             @"diagnostic_only": @YES,
             @"asserts_live_sptm_txm_response": @NO,
             @"target": @{
@@ -587,6 +654,7 @@
             @"runtime_preflight": runtimePreflight,
             @"standard_iosurface_preflight": standardIOSurfacePreflight,
             @"exploit_matrix": exploitMatrix,
+            @"jailbreak_dry_run": jailbreakDryRun,
             @"selector_counts": @{
                 @"candidates": candidateCounts,
                 @"eligible": availableCounts,
@@ -596,10 +664,10 @@
 
         NSError *jsonError = nil;
         NSData *json = [NSJSONSerialization dataWithJSONObject:report options:NSJSONWritingPrettyPrinted error:&jsonError];
-        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v5.json"];
+        NSString *outputPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-diagnostic-v6.json"];
         BOOL wroteReport = json != nil && [json writeToFile:outputPath options:NSDataWritingAtomic error:&jsonError];
         [self emitResearchDiagnosticEvent:wroteReport
-            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v5.json"
+            ? @"checkpoint=report.write status=PASS path=Documents/a15-ios26-diagnostic-v6.json"
             : [NSString stringWithFormat:@"checkpoint=report.write status=FAIL error=%@", jsonError.localizedDescription ?: @"unknown"]];
 
         dispatch_async(dispatch_get_main_queue(), ^{

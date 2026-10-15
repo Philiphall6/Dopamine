@@ -42,7 +42,7 @@ python tools/a15_ios26/analyze_titan.py \
 python tools/a15_ios26/build_response_trace.py \
   --titan-report titan-static-report.json \
   --sptm-txm-report sptm-txm-static-report.json \
-  --device-diagnostic a15-ios26-diagnostic-v5.json \
+  --device-diagnostic a15-ios26-diagnostic-v6.json \
   --json-output response-trace.json \
   --markdown-output response-trace.md
 ```

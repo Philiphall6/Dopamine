@@ -508,6 +508,30 @@ the first metadata blocker remains `selector.ppl_metadata`, the first runtime
 blocker remains `kernel.runtime_read_write`, and the protected-component
 boundary remains `NOT_REACHED`.
 
+## Phase 6 Jailbreak Selection Dry Run
+
+Phase 6 adds an ordered dry-run trace of the application jailbreak path. It
+uses `DOExploitManager` to record the exploit choices that the real path would
+make from packaged metadata and user preferences, then records the first
+proven missing requirement. This is more precise than treating every
+metadata-eligible framework as selected.
+
+The trace keeps `gatherSystemInformation` as the earliest unexecuted stage.
+It reports whether the three static inputs are already present, but it does not
+call that method because the normal path can download images and start XPF.
+It then records kernel, PAC, and PPL selection before marking exploit load,
+exploit execution, physRW construction, privilege elevation, bootstrap work,
+and protected-component access as not executed or not reached.
+
+The report schema is `dopamine.a15-ios26.device-diagnostic.v6`, written to
+`Documents/a15-ios26-diagnostic-v6.json`. Its `jailbreak_dry_run` object keeps
+explicit false flags for image download, XPF startup, framework loading,
+exploit entry points, kernel primitives, physRW, privilege changes, bootstrap
+changes, and protected requests. This test can identify the first proven
+selection blocker without claiming that a jailbreak attempt occurred.
+
+The reproducible phase 6 build and on-device result are pending.
+
 ## Remaining Hypotheses
 
 - The iOS 26 AGX layout changes represented in the guarded Titan code may be
