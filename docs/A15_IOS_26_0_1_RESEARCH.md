@@ -848,6 +848,69 @@ descriptor pointers, wrapper `0xfffffff0270cc1ac`, and fields at
 `+0x30/+0x38/+0x40`. The topology changed, but the observed permission contract
 did not.
 
+## Public Dopamine and Titan Fork Review
+
+A read-only GitHub review was performed on 2026-10-15. It covered the newest
+180 default branches in the public `opa334/Dopamine` fork network, targeted
+code-search results containing Titan's IPC helper, relevant upstream pull
+requests, and every public fork and non-default branch returned for
+`alfiecg24/Titan` (22 forks at the time of review). A GitHub fork review cannot
+prove that no unpublished work exists, but it separates implemented code from
+version-label and UI claims.
+
+No reviewed Dopamine fork contains a verified A15/23A355 adaptation of
+Titan's IPC-port transfer or a replacement SPTM/TXM bypass. The original Titan
+documentation explicitly says that its IPC port-stealing primitive was patched
+in iOS 26 by adding data PAC to `ipc_port->ip_nsrequest`. The public Titan
+forks contain no commits or divergent branches beyond the original repository.
+This is consistent with upstream Titan metadata, which limits A14-A17 support
+to iOS 16.1-17.3.1 rather than declaring A15/iOS 26 support.
+
+The strongest concrete fork result is commit `5600ac412e` on the historical
+`wip/darksword-integration` branches. It adds iOS 17.1-26.0 ClearSword/DarkSword
+structure offsets for `inpcb`, `inpcbinfo`, `socket`, and
+`kalloc_type_view`. Those exact iOS 26 values already appear in the current
+upstream code and in the successful ClearSword portion of the 23A355 device
+trace. The commit changes neither Titan nor SPTM/TXM, so it confirms the kernel
+primitive setup but does not advance the protected-write stage.
+
+`Anthony5473/dopamine-a18` is the only indexed non-upstream repository found
+with materially different Titan IPC and patchfinder sources. Its changes target
+A18/iOS 18.0-18.2. Its IPC change hard-codes `proc.p_comm = 0x56c` for
+XNU 11215, whereas the bounded 23A355 probe found both `0x56c` and `0x57d` and
+proved that only `0x57d` uniquely resolves `backboardd`. It does not implement
+an iOS 26 `ip_nsrequest` PAC solution and is not transferable to the exact
+target.
+
+`tdd761914-arch/Dopamine` contains real exploit work: an A14/T8101
+Momentarius port for iOS 17.4-18.7.1, an AGX-firmware scan through a trusted
+kernel mapping, and a separate ClearSword IOSurface cleanup overread fix. It is
+useful comparative material for A14, but it does not modify Titan, SPTM/TXM, or
+the A15/iOS 26 IPC path.
+
+The reviewed RootHide and repackaging variants either retain the exact upstream
+`ipc_port.c` blob or add only logging, path, bootstrap, and UI changes. Other
+apparent iOS 26 forks only widen `Info.plist` version ranges, change support
+text, re-upload unchanged Titan files, or remove the exploit sources entirely
+for a demo build. `OarCaw1126/Dynamite`, for example, declares Titan through
+iOS 26.0.1 by changing one metadata line while providing no corresponding
+Titan/SPTM/TXM implementation. None is evidence of a working A15/iOS 26 Titan
+path.
+
+Primary references:
+
+- https://github.com/opa334/Dopamine
+- https://github.com/opa334/Dopamine/blob/3.x/Application/Dopamine/Exploits/Titan/Info.plist
+- https://github.com/alfiecg24/Titan
+- https://github.com/masckmaster2007/Dopamine/commit/5600ac412e032b13be504cbf21ced9a52b92a7bb
+- https://github.com/Anthony5473/dopamine-a18/commit/ab1f5d2aa82370e50100d8d443d59b6f48c11c88
+- https://github.com/tdd761914-arch/Dopamine/commit/8031085a10cbc4651d25cf7c131e536b5be46065
+- https://github.com/tdd761914-arch/Dopamine/commit/8ef885889351f866756687411b9a4db608e32178
+- https://github.com/tdd761914-arch/Dopamine/commit/1a95dc986e552dcda5072d8e59100cf90a0f59e0
+- https://github.com/OarCaw1126/Dynamite/commit/adce436d3ca1712c0b578bc611b9cbb12cf58a08
+- https://github.com/P013onEr/RootHide/commit/6fa2ddf2021e4914cc9c7eec58cae7682b15fbbf
+- https://github.com/opa334/Dopamine/pull/1038
+
 ## pois0nSword Parallel Comparison
 
 `GenericCoding/pois0nSword` was reviewed at commit
