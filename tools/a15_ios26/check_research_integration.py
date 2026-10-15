@@ -130,6 +130,13 @@ def main() -> int:
         "ensureJailbreakRootExists",
     ):
         require(forbidden not in active_body, f"active probe crosses bounded stop into {forbidden}")
+    for marker in (
+        "gPrimitives.krwMinSafeReadSize",
+        "fieldEnd > readSize ? fieldEnd - readSize : 0",
+        "kreadbuf(object + readOffset, readBuffer, readSize)",
+        "UNSIGN_PTR(*(uint64_t *)&readBuffer[offset - readOffset])",
+    ):
+        require(marker in titan, f"Titan tail-aligned kernel read is missing marker: {marker}")
     diagnostic_start = main_view.find("- (void)startResearchDiagnostics")
     diagnostic_end = main_view.find("- (void)viewWillAppear", diagnostic_start)
     require(
@@ -240,7 +247,12 @@ def main() -> int:
         "CFRelease(standardSurface)" in diagnostic_body,
         "standard IOSurface is not released",
     )
-    require("ACTIVE_TITAN_PROBE_IPA_BUILT" in report, "report does not record the built active-probe state")
+    require(
+        "ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_READY" in report,
+        "report does not record the IOMachPort read-window correction state",
+    )
+    for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
+        require(marker in report, f"report is missing active-device panic evidence: {marker}")
     for marker in ("0xfffffff007aaaf58", "dictionary=+0x20", "16-byte"):
         require(marker in report, f"report is missing OSDictionary evidence: {marker}")
     require("fAddress=+0x28" in report, "report is missing the validated map offset")

@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPA_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IOKIT_BOUNDS_FIX_READY`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
@@ -25,9 +25,33 @@ bootstrap.
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` are present.
 
-This build result proves source integration and packaging only. All active
-Titan checkpoints remain `DEVICE_RESULT_PENDING` until this exact IPA is run on
-the target and its JSONL trace is recovered.
+This build was run on the exact target on 2026-10-15. It reached Titan's
+iOS 26 IORVBAR object traversal and rebooted the device with a kernel panic.
+The corrected source described below has not yet been packaged or run.
+
+## First Active Device Result
+
+The device panic was recovered over USB as
+`panic-full-2026-10-15-131411.000.ips` (1,468,402 bytes). Its incident is
+`618738CD-2B6B-4577-84AC-DD659A822CE5`; the panicked task is Dopamine, pid 843.
+The panic string is a zone-bound violation: a 32-byte read starting at offset
+`0x20` overflowed a 40-byte object in the `iokit.IOMachPort` zone.
+
+The panic's user stack was symbolicated against the exact binaries packaged in
+the IPA. It resolves through `clearsword_kreadbuf`, libjailbreak's `kreadbuf`,
+`kread64`, and `kread_ptr`, then `titan_read_valid_pointer`,
+`titan_resolve_ios26_iorvbar_mapping`, and `titan_run`. The crash therefore
+occurred while resolving the `IOMachPort::object` pointer at `+0x20`, before an
+SPTM/TXM request and before Titan's GFX ROP trigger.
+
+ClearSword advertises `krwMinSafeReadSize=0x20` and its early read primitive
+always asks the kernel for that full size even when the caller requests an
+eight-byte pointer. Reading directly at `object+0x20` consequently spans
+`[+0x20,+0x40)`, outside the observed `0x28` allocation. The corrected probe
+anchors each minimum-size read window at the end of the requested field. For
+this pointer it reads `[+0x08,+0x28)` and extracts the final eight bytes. This
+is still a read-only change; it does not add a kernel write, physical write,
+protected request, privilege change, or bootstrap operation.
 
 ## End-to-End Chain Status
 
@@ -40,18 +64,18 @@ the target and its JSONL trace is recovered.
 | Existing GFX IORVBAR mapping | **ACTIVE ADAPTATION** | The 8-byte `IOMemoryMap` is rediscovered and revalidated at runtime; no per-boot address is embedded |
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
-| Kernel read/write exploit primitive | **ACTIVE PROBE ENABLED / DEVICE RESULT PENDING** | The probe loads the selected ClearSword candidate and validates the kernel Mach-O header before Titan |
-| Titan unrestricted physical write | **ACTIVE PROBE ENABLED / DEVICE RESULT PENDING** | Titan records every major stage through the GFX ROP result and publishes no compatibility claim |
+| Kernel read/write exploit primitive | **PASS WITH READ-WINDOW CONSTRAINT** | ClearSword validated the live kernel header; its fixed 0x20 read width must be tail-aligned near zone boundaries |
+| Titan unrestricted physical write | **NOT REACHED / IOKIT READ FIX READY** | First run panicked in IORVBAR object traversal before GFX patchfinding or ROP submission |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
 
 ClearSword/DarkSword provide the kernel read/write candidate used through iOS
 26.0.1, and the device-side selector chooses ClearSword for this exact target.
-The active probe now calls that candidate, validates the resulting kernel read,
-and enters Titan. Device execution is still required to determine the first
-runtime blocker; passing static patchfinders does not by itself bridge the
-SPTM/TXM gap.
+The active probe called that candidate, validated the resulting kernel read,
+and entered Titan. The first runtime blocker is now identified as ClearSword's
+minimum read window at an IOMachPort tail field. This is earlier than every
+SPTM/TXM operation; passing static patchfinders still does not bridge that gap.
 
 ## Exact-target active probe
 
@@ -98,11 +122,11 @@ The published Titan path has four architectural phases:
    knowing their static addresses does not create the physical-write primitive.
 
 For iPhone14,2 on iOS 26.0.1, phases 1 and 2 now have an exact-target active
-probe implementation. ClearSword is executed first, its kernel read is checked
-against the live Mach-O header, and Titan then advances one checkpoint at a
-time. No successful controlled mapping window, unrestricted physical write, or
-SPTM bypass has yet been observed on-device. The static TXM base and passing
-XPF relationships therefore remain evidence, not a bypass claim.
+probe implementation. ClearSword was executed first, its kernel read was
+checked against the live Mach-O header, and Titan entered its IORVBAR object
+traversal. No successful controlled mapping window, unrestricted physical
+write, or SPTM bypass has yet been observed on-device. The static TXM base and
+passing XPF relationships therefore remain evidence, not a bypass claim.
 
 ## Diagnostic Response Logging
 
@@ -111,21 +135,23 @@ input class, return status, and last completed stage. A process exit or reboot
 must be recorded as an interrupted stage rather than interpreted as a protocol
 response.
 
-The new source records a durable checkpoint immediately before every active
+The source records a durable checkpoint immediately before every active
 boundary, including command-buffer setup, the IORVBAR read, firmware copying,
-both patchfinders, target-job mapping, and the GFX ROP trigger. Until the new IPA
-is run, these stages remain `DEVICE_RESULT_PENDING`; they must not be inferred
-from the earlier read-only captures.
+both patchfinders, target-job mapping, and the GFX ROP trigger. The first run
+reached IORVBAR object traversal and then panicked in the minimum-width kernel
+read described above. Later stages remain `DEVICE_RESULT_PENDING` until the
+corrected IPA is run; they must not be inferred from the static captures.
 
 | Observable checkpoint | Current target result |
 |---|---|
 | Application support gate | `EXACT_ACTIVE_PROBE`; full jailbreak support remains false |
-| Kernel exploit result | `DEVICE_RESULT_PENDING`; ClearSword selected |
+| Kernel exploit result | `PASS`; ClearSword selected and live kernel Mach-O header validated |
 | Kernel patchfinder | `STATIC_PASS`; active checkpoint added |
 | Titan iOS 26 guard | exact `iPhone14,2/23A355` gate plus runtime object validation |
 | RTBuddy/segment discovery | `READ_ONLY_PASS` from bounded capture |
 | GFX firmware patchfinder | `STATIC_PASS` on the extracted image |
-| GFX physical addresses and translation root | `DEVICE_RESULT_PENDING` |
+| IORVBAR object traversal | `INTERRUPTED`; IOMachPort tail-read correction ready |
+| GFX physical addresses and translation root | `DEVICE_RESULT_PENDING`; not reached in first run |
 | Controlled mapping window | `DEVICE_RESULT_PENDING` |
 | Titan `physwritebuf` publication | `DEVICE_RESULT_PENDING` |
 | Dopamine physical read/write construction | `NOT_REACHED` |
@@ -735,13 +761,16 @@ or build.
 
 ## Blockers
 
-### ACTIVE_TITAN_PROBE_IPA_BUILT
+### IOKIT_MINIMUM_READ_WINDOW
 
 The legacy `IOMemoryMap::wireRange` signature resolves an impossible `+0x260`
 field offset and remains rejected. The active path instead rediscovers the
 already existing eight-byte map and validates `fAddress=+0x28` plus the linked
-object graph before using it. The first runtime blocker after that point is not
-known until the new IPA produces its JSONL trace.
+object graph before using it. The first runtime attempt panicked earlier while
+reading `IOMachPort::object`: ClearSword expanded the eight-byte request to its
+minimum 32-byte kernel read and crossed the object's allocation boundary. The
+source now tail-aligns that read window, but the correction still needs an
+on-device run.
 
 Consequences:
 
@@ -758,8 +787,8 @@ Consequences:
 
 ## Next Steps
 
-1. Build and install the exact-target IPA.
-2. Run the active probe once and recover
+1. Build and install the IOMachPort read-window correction.
+2. Run the corrected active probe once and recover
    `Documents/a15-ios26-active-probe.jsonl` after completion, process exit, or
    reboot.
 3. Identify the last `PASS` and following `START`/`FAIL` pair before changing
