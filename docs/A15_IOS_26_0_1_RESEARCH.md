@@ -149,6 +149,12 @@ device-family, and build-override decisions. It also records arm64e, PAC/PPL
 requirements, installation mode, and the presence of local kernelcache, SPTM,
 and TXM artifacts in the app bundle or Documents directory.
 
+Metadata eligibility is reported separately from runtime availability. In
+particular, a kernel framework matching an iOS range remains only a candidate;
+it does not establish a working A15 primitive. The overall chain stays blocked
+unless every required stage has a matching candidate, and runtime kernel R/W
+stays `MISSING` until independently observed.
+
 This preflight only reads bundle metadata, environment properties, and file
 existence. The guarded method is statically prohibited from referencing exploit
 loading, `IOServiceOpen`, `IOConnectCall`, kernel read/write, command-buffer

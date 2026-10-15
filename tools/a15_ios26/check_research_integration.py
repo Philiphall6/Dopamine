@@ -116,6 +116,8 @@ def main() -> int:
         'record(@"selector.pac"',
         'record(@"selector.ppl"',
         'record(@"selector.overall"',
+        '@"METADATA_ELIGIBLE"',
+        '@"metadata-candidate-only-no-verified-runtime-primitive"',
         'record(@"titan.command_buffers", @"BLOCKED"',
         'record(@"titan.physical_write", @"NOT_REACHED"',
         'record(@"sptm_txm.runtime_response", @"NOT_REACHED"',

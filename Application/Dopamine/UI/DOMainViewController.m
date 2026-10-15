@@ -358,17 +358,17 @@
             }
         }
 
-        record(@"selector.kernel", availableCounts[@"Kernel"].unsignedIntegerValue ? @"AVAILABLE" : @"MISSING",
+        record(@"selector.kernel", availableCounts[@"Kernel"].unsignedIntegerValue ? @"METADATA_ELIGIBLE" : @"METADATA_MISSING",
                [NSString stringWithFormat:@"eligible=%@ candidates=%@", availableCounts[@"Kernel"], candidateCounts[@"Kernel"]]);
-        record(@"selector.pac", pacRequired ? (availableCounts[@"PAC"].unsignedIntegerValue ? @"AVAILABLE" : @"MISSING") : @"NOT_REQUIRED",
+        record(@"selector.pac", pacRequired ? (availableCounts[@"PAC"].unsignedIntegerValue ? @"METADATA_ELIGIBLE" : @"METADATA_MISSING") : @"NOT_REQUIRED",
                [NSString stringWithFormat:@"eligible=%@ candidates=%@", availableCounts[@"PAC"], candidateCounts[@"PAC"]]);
-        record(@"selector.ppl", pplRequired ? (availableCounts[@"PPL"].unsignedIntegerValue ? @"AVAILABLE" : @"MISSING") : @"NOT_REQUIRED",
+        record(@"selector.ppl", pplRequired ? (availableCounts[@"PPL"].unsignedIntegerValue ? @"METADATA_ELIGIBLE" : @"METADATA_MISSING") : @"NOT_REQUIRED",
                [NSString stringWithFormat:@"eligible=%@ candidates=%@", availableCounts[@"PPL"], candidateCounts[@"PPL"]]);
         NSString *selectorBlocker = availableCounts[@"Kernel"].unsignedIntegerValue == 0 ? @"kernel-exploit-missing" :
             (pplRequired && availableCounts[@"PPL"].unsignedIntegerValue == 0 ? @"ppl-bypass-missing" : @"none");
-        record(@"selector.overall", [selectorBlocker isEqualToString:@"none"] ? @"METADATA_ELIGIBLE" : @"BLOCKED", selectorBlocker);
+        record(@"selector.overall", [selectorBlocker isEqualToString:@"none"] ? @"METADATA_CHAIN_COMPLETE" : @"BLOCKED", selectorBlocker);
 
-        record(@"kernel.runtime_read_write", @"MISSING", @"no-target-compatible-primitive");
+        record(@"kernel.runtime_read_write", @"MISSING", @"metadata-candidate-only-no-verified-runtime-primitive");
         record(@"titan.command_buffers", @"BLOCKED", @"diagnostic-mode");
         record(@"titan.physical_write", @"NOT_REACHED", @"physwritebuf-not-published");
         record(@"sptm_txm.runtime_response", @"NOT_REACHED", @"no-protected-component-request-issued");
