@@ -109,11 +109,11 @@ all runtime response fields must remain absent and the trace must remain
 ## Reproducible Diagnostic Build
 
 - Source branch: `codex/a15-ios26-diagnostic-20261014`
-- Source commit: `0feb27f04c8a30e21f3690e352472c958bc8fddd`
-- GitHub Actions run: `38585285602` (successful, 2026-10-14)
-- Artifact: `Dopamine-A15-iOS26-diagnostic-0feb27f.ipa`
-- Size: `55,438,216` bytes
-- SHA-256: `07C9A94BB27BB1C89E083EF0159978A4FCD56BBF47F99E50D83535128929935F`
+- Source commit: `718a49a8d93a57c89831776cdc1529e4d98df423`
+- GitHub Actions run: `38690838360` (successful, 2026-10-15)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-v2-718a49a.ipa`
+- Size: `55,444,034` bytes
+- SHA-256: `330DA0766A891C3A1792FC78B1C40FD263B1C1CD3251EB2434D1ABE80AD2287F`
 - Application version: `3.0.11` (`com.opa334.Dopamine`)
 
 On the exact iPhone14,2 / iOS 26.0.1 research target, this build replaces the
@@ -142,7 +142,7 @@ The seven reported checkpoints match the expected bounded state:
 
 ### Phase 2 metadata preflight
 
-The next bounded build advances the diagnosis without advancing execution. Its
+The phase 2 bounded build advances the diagnosis without advancing execution. Its
 `dopamine.a15-ios26.device-diagnostic.v2` report reproduces the packaged exploit
 selection rules for every framework and flavor, recording version-range,
 device-family, and build-override decisions. It also records arm64e, PAC/PPL
