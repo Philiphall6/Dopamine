@@ -13,7 +13,7 @@
 #import "DOActionMenuButton.h"
 #import "DOUpdateViewController.h"
 #import "DOLogCrashViewController.h"
-#import <IOSurface/IOSurface.h>
+#import <IOSurface/IOSurfaceRef.h>
 #import <mach/mach.h>
 #import <mach-o/loader.h>
 #import <os/log.h>
