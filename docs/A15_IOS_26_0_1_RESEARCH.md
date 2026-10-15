@@ -414,7 +414,20 @@ allocation size, and immediately releases it. Static guards reject base-address
 access, Mach-port creation, page prefetching, memory-region selection, IOKit,
 socket, exploit, GPU, kernel-write, and SPTM/TXM calls from the diagnostic body.
 The report schema is `dopamine.a15-ios26.device-diagnostic.v4`, written to
-`Documents/a15-ios26-diagnostic-v4.json`. Device observations are pending.
+`Documents/a15-ios26-diagnostic-v4.json`.
+
+The reproducible phase 4 build completed successfully on 2026-10-15:
+
+- Source commit: `aac651dceed2864a9e9b8426e749d0a438e823a2`
+- GitHub Actions run: `38697310661` (successful in 11m 27s)
+- Artifact: `Dopamine-A15-iOS26-diagnostic-v4-aac651d.ipa`
+- Size: `55,448,017` bytes
+- SHA-256: `F0A09788B46FE6D0614D46ED31EE909DD97A9AF1E16A3BB190763FD36C0D0BD6`
+
+Post-build inspection confirms the v4 schema, output filename, bounded
+IOSurface checkpoint, and all five negative safety flags in the main
+executable. Titan's declared iOS `16.1` through `17.3.1` range is unchanged.
+Device observations for this phase are pending.
 
 ## Remaining Hypotheses
 
