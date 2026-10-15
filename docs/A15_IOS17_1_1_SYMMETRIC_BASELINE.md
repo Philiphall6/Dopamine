@@ -220,6 +220,26 @@ metadata widening was used. `PASS` means that the requested static
 relationships were resolved; it does not mean a protected request ran or that
 SPTM/TXM accepted one.
 
+## Symmetric analyzer v3 entry census
+
+The v3 reports preserve all v2 checks and add the same instruction-level entry
+census to both samples. On 21B91, TXM contains one `SVC #0`; the kernel
+contains seven `GENTER` instructions with immediate counts `#0=4`, `#1=1`,
+`#2=1`, and `#3=1`. On 23A355, TXM contains two `SVC #0` thunks; the kernel
+contains nine `GENTER` instructions with `#0=5` and one each of `#1` through
+`#4`.
+
+The analyzer records nearby `x16` writes and bounded disassembly windows. It
+does not assign endpoint names or treat the immediate as a dispatch-table
+identity. No protected instruction was executed.
+
+| v3 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v3.json` | `87658C6F24C2F8EE19A689DB90CCF52233A646B89D69D6F6CE0FCC372D2256B4` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v3.md` | `12E0077BCA191F920EA1A9DD704F9FED876140F29BE5C379307ACE011F65452D` |
+| `sptm-txm-static-report-v3.json` | `8AE272D5F03990721D29180724BB59B4264056A445EDB0BCFBE4C9DDE7DAE5DA` |
+| `sptm-txm-static-report-v3.md` | `F65226F1F2F3A715F3ED74280D914F39FD564201FB9B00DE6CDC152468D90FC6` |
+
 ## Created artifacts
 
 All extracted files and generated reports are under:

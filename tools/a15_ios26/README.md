@@ -70,12 +70,21 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
 - frame-type policy representation as either `immediate_bitmask` or
   `descriptor_table`
 - `libsptm_init` and its PAPT range globals
+- TXM `SVC #0` entry thunks and kernel `GENTER` occurrences
+- nearby `x16` selector-register writes, reported without assigning endpoint
+  semantics
 
 These results show patchfinder compatibility for the inspected paths. They do
 not provide the unrestricted physical-write primitive required by Dopamine's
 SPTM bypass contract, and therefore do not make A15/iOS 26 jailbreak-compatible
 by themselves. All reported addresses are unslid and specific to the analyzed
 firmware build.
+
+Capstone currently decodes the Apple `GENTER` opcode as data. The analyzer
+therefore recognizes the bounded opcode family `0x00201420` with mask
+`0xffffffe0` and records the low five-bit immediate explicitly. This is a
+static instruction census only. It does not invoke an entry thunk, infer a
+dispatch-table identity, or validate a runtime request or response.
 
 The Titan report has the same limitation. A static PASS does not validate the
 live RTKit state, command-buffer setup, GFX ROP trigger, or physical-write

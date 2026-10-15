@@ -36,9 +36,9 @@ provenance is the Apple IPSW `BuildManifest.plist`, which identifies `d63ap`,
 | Area | iOS 17.1.1 observation | iOS 26.0.1 observation | Assessment |
 |---|---|---|---|
 | Component split | Separate SPTM and TXM images extracted | Separate SPTM and TXM images extracted | Confirmed continuity |
-| XNU entry | XNU enters SPTM with `GENTER #0` | Exact entry sequence not yet independently matched | Open static check |
-| TXM entry | TXM enters SPTM with `SVC #0` | Exact entry sequence not yet independently matched | Open static check |
-| Dispatch | SPTM routes subsystem IDs through dispatch tables; TXM is subsystem 1 | Dispatch-related behavior is consistent with the retained component split, but the iOS 26 dispatch table has not been mapped by the current analyzer | Do not assume selector identity |
+| XNU entry | 7 kernel `GENTER` instructions: four `#0`, then one each of `#1` through `#3` | 9 kernel `GENTER` instructions: five `#0`, then one each of `#1` through `#4` | Entry family confirmed; 23A355 adds one immediate and two occurrences |
+| TXM entry | One `SVC #0` thunk | Two adjacent `SVC #0` thunks | Entry instruction confirmed on both builds |
+| Dispatch | Nearby `x16` setup includes the same dynamic high-halfword wrappers and a boot descriptor ending in `0xf` | The corresponding `x16` setup patterns remain visible; the immediate stubs add `BTI` and `GENTER #4` | Selector construction is observable; endpoint/table identity remains unresolved |
 | Page ownership | PAPT range management resolves; frame types use immediate bit masks | PAPT range management resolves; frame types use a global descriptor table with `0x60`-byte records | Confirmed continuity with a changed representation |
 | Kernel integration | `sptm_get_page_table_refcnt`, `libsptm_init`, PAPT globals, and `SPTMArgs` resolve; descriptor-table fields are absent | `libsptm_init`, `sptm_args`, page-table refcount helper, and descriptor-table relationships resolve | Same roles, different frame-type policy model |
 | TXM role | Trust-cache root and developer-mode storage resolve through direct `ADR` chains | Trust-cache root, developer-mode storage, and license relationships resolve | Strong static continuity |
@@ -59,6 +59,36 @@ The iOS 26 TXM image resolves the device-tree trust-cache range and one
 candidate each for the trust-cache root and developer-mode storage. The kernel
 image resolves the SPTM argument structure, `libsptm_init`, and the page-table
 reference-count helper used by the current Dopamine static analysis.
+
+## Symmetric Entry-Sequence Result
+
+The v3 analyzer recognizes Apple's `GENTER` instruction from its raw opcode
+family because the local Capstone build emits it as four data bytes. The
+matching rule is `opcode & 0xffffffe0 == 0x00201420`; the low five bits are
+reported as the immediate. `GEXIT` (`0x00201400`) does not match this rule.
+
+On 21B91, TXM has one `SVC #0` at `0xfffffff01705405c`. A nearby four-`movk`
+sequence writes every 16-bit lane of `x16` and branches to that thunk. On
+23A355, TXM has adjacent thunks at `0xfffffff017064004` and
+`0xfffffff017064010`; the same four-`movk` sequence branches to the first.
+This confirms the entry mechanism but does not establish why the second thunk
+exists.
+
+The kernel-side census is:
+
+| Build | `GENTER #0` | `#1` | `#2` | `#3` | `#4` | Total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 21B91 | 4 | 1 | 1 | 1 | 0 | 7 |
+| 23A355 | 5 | 1 | 1 | 1 | 1 | 9 |
+
+Both builds contain structurally matching `GENTER #0` wrappers that load
+arguments through `x0`-`x7` and prepare `x16` with dynamic low bits plus a
+high halfword of `2` or `3`. Both also contain a boot path that writes all four
+`x16` lanes, ending with low value `0xf`, before `GENTER #0`. The iOS 26
+immediate stubs add `BTI` landing pads and extend the visible immediate set to
+`#4`. These are instruction-level similarities and differences only. The
+analysis does not name an endpoint, map an SPTM dispatch table, issue a call,
+or observe a return value.
 
 ## Result
 
@@ -81,6 +111,16 @@ inventing an iOS 17 descriptor table.
 | `ios17_1_1-symmetric/sptm-txm-static-report-v2.md` | `86C04F1A9E3A3D2D50FBBFE034717D5F55F1EEFC48C93B6435ED69B0AEE82C9D` |
 | `sptm-txm-static-report-v2.json` | `5E1BB0D9C7B8ED42288639F78B9AD1031E0B03C418F2E277B205D3876676BDE8` |
 | `sptm-txm-static-report-v2.md` | `D800F9D162CB57493B0CA4544726F57588E537AF6EE02480C280871427652141` |
+
+The v3 artifacts add only the symmetric entry-sequence census and bounded
+instruction windows. Their hashes are:
+
+| v3 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v3.json` | `87658C6F24C2F8EE19A689DB90CCF52233A646B89D69D6F6CE0FCC372D2256B4` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v3.md` | `12E0077BCA191F920EA1A9DD704F9FED876140F29BE5C379307ACE011F65452D` |
+| `sptm-txm-static-report-v3.json` | `8AE272D5F03990721D29180724BB59B4264056A445EDB0BCFBE4C9DDE7DAE5DA` |
+| `sptm-txm-static-report-v3.md` | `F65226F1F2F3A715F3ED74280D914F39FD564201FB9B00DE6CDC152468D90FC6` |
 
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
@@ -129,11 +169,12 @@ provenance, BuildManifest identities, hashes, reproducible Windows commands,
 and full analyzer result are recorded in
 `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`.
 
-The bounded `ADR` resolution and tagged frame-type policy normalization are now
-implemented. Raw reports remain separate from the `-v2` reports. The next
-justified static step is to compare the SPTM/TXM entry and dispatch sequences
-with the same instruction-level rules on both builds. Static similarity still
-cannot establish selector, ABI, or runtime-response identity.
+The bounded `ADR` resolution, tagged frame-type policy normalization, and
+entry-instruction census are now implemented. Raw, `-v2`, and `-v3` reports
+remain separate. The next justified static step is to trace each observed
+`x16` construction back to its call-site provenance and locate dispatch-table
+cross-references with the same rules on both builds. Static similarity still
+cannot establish selector, ABI, endpoint, or runtime-response identity.
 
 ## Sources
 
@@ -145,6 +186,7 @@ cannot establish selector, ABI, or runtime-response identity.
 - https://github.com/opa334/ChOma
 - https://github.com/jprx/qemu-sptm
 - https://github.com/jprx/darwin-vm
+- https://github.com/Vector35/binaryninja-api/issues/5933
 - https://gist.github.com/asdfugil/101ae32734938cf2c186ff330fba1e97
 - `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`
 - `outputs/iphone-system/ios17_1_1-symmetric/sptm-txm-static-report.json`

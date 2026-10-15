@@ -522,6 +522,14 @@ frame-type policy as `immediate_bitmask` on 21B91 or `descriptor_table` on
 both builds. This removes two analyzer limitations but does not change the live
 chain: no protected request was generated or transmitted.
 
+The v3 static reports add a symmetric entry-instruction census. Build 21B91
+contains one TXM `SVC #0` and seven kernel `GENTER` instructions (`#0` through
+`#3`); build 23A355 contains two TXM `SVC #0` thunks and nine kernel `GENTER`
+instructions (`#0` through `#4`). Nearby `x16` setup is retained as evidence,
+but no endpoint or dispatch-table identity is inferred. This remains offline
+evidence: no privileged instruction was executed and the protected-component
+boundary remains `NOT_REACHED`.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It

@@ -27,12 +27,16 @@ def mem(base: int, displacement: int):
     )
 
 
-def instruction(address, instruction_id, mnemonic, operands):
+def instruction(
+    address, instruction_id, mnemonic, operands, raw=b"\0\0\0\0", op_str=""
+):
     return types.SimpleNamespace(
         address=address,
         id=instruction_id,
         mnemonic=mnemonic,
         operands=operands,
+        bytes=raw,
+        op_str=op_str,
     )
 
 
@@ -110,6 +114,53 @@ class FrameTypePolicyTests(unittest.TestCase):
             [entry["mask"] for entry in policy["mask_tests"]],
             [0x00060100, 0x00180200],
         )
+
+
+class EntrySequenceTests(unittest.TestCase):
+    def test_decodes_apple_genter_immediates(self):
+        self.assertEqual(
+            analyzer._decode_apple_genter_immediate(bytes.fromhex("20142000")),
+            0,
+        )
+        self.assertEqual(
+            analyzer._decode_apple_genter_immediate(bytes.fromhex("24142000")),
+            4,
+        )
+        self.assertIsNone(
+            analyzer._decode_apple_genter_immediate(bytes.fromhex("00142000"))
+        )
+
+    def test_collects_only_svc_zero(self):
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(
+                0x3000,
+                analyzer.ARM64_INS_SVC,
+                "svc",
+                [imm(0)],
+                bytes.fromhex("010000d4"),
+                "#0",
+            ),
+            instruction(
+                0x3004,
+                analyzer.ARM64_INS_SVC,
+                "svc",
+                [imm(0x25)],
+                bytes.fromhex("a10400d4"),
+                "#0x25",
+            ),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+        image.function_start = lambda address: 0x3000
+        image.window = lambda address, before, after: [f"window:{address:x}"]
+
+        entries = analyzer._collect_svc_zero_entries(image)
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["address"], 0x3000)
+        self.assertEqual(entries[0]["opcode"], "010000d4")
 
 
 if __name__ == "__main__":

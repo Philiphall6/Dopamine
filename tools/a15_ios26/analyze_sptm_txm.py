@@ -30,6 +30,7 @@ try:
     from capstone.arm64 import ARM64_INS_B, ARM64_INS_BL
     from capstone.arm64 import ARM64_INS_CMP, ARM64_INS_MOV
     from capstone.arm64 import ARM64_INS_LDR, ARM64_INS_LDRB
+    from capstone.arm64 import ARM64_INS_SVC
     from capstone.arm64 import ARM64_INS_STR, ARM64_INS_STRB
     from capstone.arm64 import ARM64_REG_WZR, ARM64_REG_XZR
 except ImportError as exc:  # pragma: no cover - depends on the analyst's host
@@ -37,6 +38,8 @@ except ImportError as exc:  # pragma: no cover - depends on the analyst's host
 
 
 UINT64_MASK = (1 << 64) - 1
+APPLE_GENTER_BASE = 0x00201420
+APPLE_GENTER_MASK = 0xFFFFFFE0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -341,6 +344,91 @@ class MachOImage:
         return list(unique.values())
 
 
+def _decode_apple_genter_immediate(raw: bytes) -> int | None:
+    if len(raw) != 4:
+        return None
+    opcode = int.from_bytes(raw, byteorder="little")
+    if (opcode & APPLE_GENTER_MASK) != APPLE_GENTER_BASE:
+        return None
+    return opcode & 0x1F
+
+
+def _nearby_x16_writes(
+    image: MachOImage, address: int, radius: int = 12
+) -> list[dict]:
+    index = image._instruction_index.get(address)
+    if index is None:
+        return []
+    writes = []
+    for candidate in image.instructions[
+        max(0, index - radius) : index + radius + 1
+    ]:
+        if candidate.id == 0 or not candidate.operands:
+            continue
+        destination = candidate.operands[0]
+        if destination.type != capstone.CS_OP_REG:
+            continue
+        if candidate.reg_name(destination.reg) not in {"x16", "w16"}:
+            continue
+        writes.append(
+            {
+                "address": candidate.address,
+                "relative_instructions": (candidate.address - address) // 4,
+                "mnemonic": candidate.mnemonic,
+                "operands": candidate.op_str,
+            }
+        )
+    return writes
+
+
+def _collect_svc_zero_entries(image: MachOImage) -> list[dict]:
+    entries = []
+    for instruction in image.instructions:
+        if instruction.id != ARM64_INS_SVC or not instruction.operands:
+            continue
+        immediate_operands = [
+            operand
+            for operand in instruction.operands
+            if operand.type == capstone.CS_OP_IMM
+        ]
+        if not immediate_operands or int(immediate_operands[0].imm) != 0:
+            continue
+        entries.append(
+            {
+                "address": instruction.address,
+                "immediate": 0,
+                "opcode": bytes(instruction.bytes).hex(),
+                "function_candidate": image.function_start(instruction.address),
+                "nearby_x16_writes": _nearby_x16_writes(
+                    image, instruction.address
+                ),
+                "window": image.window(instruction.address, before=8, after=12),
+            }
+        )
+    return entries
+
+
+def _collect_genter_entries(image: MachOImage) -> list[dict]:
+    entries = []
+    for instruction in image.instructions:
+        immediate = _decode_apple_genter_immediate(bytes(instruction.bytes))
+        if immediate is None:
+            continue
+        entries.append(
+            {
+                "address": instruction.address,
+                "immediate": immediate,
+                "opcode": bytes(instruction.bytes).hex(),
+                "function_candidate": image.function_start(instruction.address),
+                "nearby_x16_writes": _nearby_x16_writes(
+                    image, instruction.address
+                ),
+                "window": image.window(instruction.address, before=8, after=8),
+            }
+        )
+    return entries
+
+
 def _is_strb_wzr(instruction) -> bool:
     return (
         instruction.id == ARM64_INS_STRB
@@ -431,6 +519,10 @@ def analyze_txm(image: MachOImage) -> dict:
     result: dict = {
         "path": str(image.path),
         "imagebase": image.imagebase,
+        "sptm_entry_sequences": {
+            "instruction": "svc #0",
+            "entries": _collect_svc_zero_entries(image),
+        },
         "anchors": {},
         "device_tree_trust_cache_range": {},
         "trustcache_root_candidates": [],
@@ -581,6 +673,12 @@ def analyze_kernel(image: MachOImage) -> dict:
         "path": str(image.path),
         "fileset": image.binary.fileset_name,
         "imagebase": image.imagebase,
+        "sptm_entry_sequences": {
+            "instruction": "genter",
+            "opcode_mask": f"0x{APPLE_GENTER_MASK:08x}",
+            "opcode_base": f"0x{APPLE_GENTER_BASE:08x}",
+            "entries": _collect_genter_entries(image),
+        },
         "anchors": {},
         "sptm_get_page_table_refcnt": {},
         "refcnt_dependents": {},
@@ -989,6 +1087,34 @@ def _append_window(lines: list[str], window: Sequence[str]) -> None:
     lines.extend(("", "```asm", *window, "```"))
 
 
+def _append_entry_sequences(
+    lines: list[str], sequences: dict, include_windows: bool
+) -> None:
+    entries = sequences.get("entries", [])
+    instruction = sequences.get("instruction", "unknown")
+    total_count = sequences.get("total_count", len(entries))
+    count_note = (
+        ""
+        if total_count == len(entries)
+        else f" (showing {len(entries)} representative immediate values)"
+    )
+    lines.append(f"- `{instruction}` entries: {total_count}{count_note}")
+    for entry in entries:
+        selector_writes = "; ".join(
+            f"{write['relative_instructions']:+d}: "
+            f"{write['mnemonic']} {write['operands']}"
+            for write in entry.get("nearby_x16_writes", [])
+        )
+        lines.append(
+            f"- `{_format_address(entry['address'])}`: immediate "
+            f"`#{entry['immediate']}`, opcode `{entry['opcode']}`; "
+            "nearby `x16` writes: "
+            + (selector_writes or "none")
+        )
+        if include_windows:
+            _append_window(lines, entry.get("window", []))
+
+
 def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
     txm_static_ok = bool(
         txm["device_tree_trust_cache_range"].get("function")
@@ -1047,6 +1173,9 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
         "",
         f"- Image base: `{_format_address(txm['imagebase'])}`",
     ]
+
+    lines.extend(("", "### SPTM entry instructions", ""))
+    _append_entry_sequences(lines, txm["sptm_entry_sequences"], True)
 
     for anchor, entries in txm["anchors"].items():
         if not entries:
@@ -1174,6 +1303,24 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
                 f"- Fileset: `{kernel['fileset']}`",
                 f"- Image base: `{_format_address(kernel['imagebase'])}`",
             )
+        )
+        lines.extend(("", "### SPTM entry instructions", ""))
+        kernel_sequences = kernel["sptm_entry_sequences"]
+        entries_by_immediate = {}
+        for entry in kernel_sequences.get("entries", []):
+            entries_by_immediate.setdefault(entry["immediate"], entry)
+        _append_entry_sequences(
+            lines,
+            {
+                **kernel_sequences,
+                "total_count": len(kernel_sequences.get("entries", [])),
+                "entries": list(entries_by_immediate.values()),
+            },
+            True,
+        )
+        lines.append(
+            "- The Markdown view shows one representative per immediate; "
+            "the JSON report retains every occurrence."
         )
         for anchor, entries in kernel["anchors"].items():
             if not entries:
