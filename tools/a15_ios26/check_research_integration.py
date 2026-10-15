@@ -63,6 +63,9 @@ def main() -> int:
     main_view = (ROOT / "Application/Dopamine/UI/DOMainViewController.m").read_text()
     jailbreaker = (ROOT / "Application/Dopamine/Jailbreak/DOJailbreaker.m").read_text()
     titan = (ROOT / "Application/Dopamine/Exploits/Titan/exploit/titan.m").read_text()
+    ipc_port = (
+        ROOT / "Application/Dopamine/Exploits/Titan/exploit/ipc_port.c"
+    ).read_text()
     clearsword_krw = (
         ROOT / "Application/Dopamine/Exploits/ClearSword/exploit/krw.c"
     ).read_text()
@@ -251,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_DESCRIPTOR_RANGE_FIX_BUILT" in report,
-        "report does not record the descriptor-range correction state",
+        "ACTIVE_TITAN_PROBE_PROC_NAME_DISCOVERY_READY" in report,
+        "report does not record the bounded proc-name discovery state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
@@ -325,6 +328,23 @@ def main() -> int:
         "read_data_length < size",
     ):
         require(marker in clearsword_krw, f"ClearSword exact-read path is missing marker: {marker}")
+    for marker in (
+        "if (!gTitanContext.ios26_a15_active_probe)",
+        "proc_find_by_name_legacy",
+        'dlsym(RTLD_DEFAULT,\n                                                    "clearsword_kreadbuf_exact")',
+        "TITAN_PROC_IMAGE_MAX_SIZE",
+        "TITAN_PROC_NAME_CANDIDATE_MAX",
+        "TITAN_PROC_TRAVERSAL_MAX",
+        "proc_self()",
+        "titan.proc-name-offset CANDIDATE",
+        "titan.proc-by-name PASS",
+        "koffsetof(proc, list_next)",
+    ):
+        require(marker in ipc_port, f"bounded proc-name discovery is missing marker: {marker}")
+    require(
+        "int offset = 0x579" not in ipc_port,
+        "iOS 26 proc-name lookup still hard-codes the stale p_comm offset",
+    )
     for marker in (
         "!titan_gadget(tpidrro_el0)",
         "!titan_gadget(write)",

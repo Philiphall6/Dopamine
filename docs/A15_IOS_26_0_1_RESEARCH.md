@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_DESCRIPTOR_RANGE_FIX_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_PROC_NAME_DISCOVERY_READY`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
@@ -27,8 +27,9 @@ bootstrap.
 
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
 packaged Titan binary contains all nine exact-read checkpoints for the map and
-descriptor fields. The preceding `1673566` build validated the exact-read
-adapter on-device; this descriptor-range build has not yet been run.
+descriptor fields. The `c703565` descriptor-range build has now passed those
+checks on-device; the next source revision addresses the newly exposed process
+lookup blocker and still requires CI packaging.
 
 ## First Active Device Result
 
@@ -103,11 +104,38 @@ pointer at `+0x60`, range count at `+0x68`, and the single inline physical range
 at the pointed-to `{+0x0,+0x8}` pair. The same `+0x50/+0x60` accessors exist in
 libjailbreak's XNU-derived descriptor helpers.
 
-The next source revision now reads those fields through
+The `c703565` source revision reads those fields through
 `clearsword_kreadbuf_exact`, requires one range, and independently validates
 both descriptor and range lengths as eight bytes. It also exact-reads the four
-`IOMemoryMap` linkage/address fields. The route still stops before MMIO access,
-GFX command submission, physical-write publication, privileges, or bootstrap.
+`IOMemoryMap` linkage/address fields. The device result below confirms those
+checks and still stops before GFX command submission, physical-write
+publication, privileges, or bootstrap.
+
+## Fourth Active Device Result
+
+The descriptor-range `c703565` build was run on the exact target on 2026-10-15.
+ClearSword again established the kernel primitive, and Titan passed the complete
+IORVBAR object traversal. The live `IOMemoryMap` linked back to the expected
+descriptor and reported `fOffset=0`, `fAddress=0xffffffecfef84000`, and
+`fLength=0x8`. The descriptor reported total length `0x8`, one range at
+`0xffffffe08f893af8`, and the exact physical pair `0x206050000/0x8`. Titan then
+recorded `titan.iorvbar.resolve PASS` without a panic or reboot.
+
+The new first failure is `titan.command-buffers`: the legacy
+`proc_find_by_name` could not find `backboardd`. An independent USB process list
+confirmed that `backboardd` was alive as pid 72, so this is a lookup-layout
+failure rather than a missing process. The function still used the historical
+hard-coded process-name offset `0x579`, which is not validated for the observed
+XNU 25 `proc` size of `0x748`.
+
+The next bounded revision leaves the legacy path unchanged outside this exact
+probe. On iPhone14,2/23A355 it exact-reads the current Dopamine `proc`, discovers
+every NUL-terminated occurrence of its own executable name, and treats those
+offsets only as candidates. It then traverses at most 4096 processes, requires
+all target-name matches to resolve to one `proc`, exact-reads its pid, and fails
+closed on invalid pointers, read errors, ambiguity, or exhausted bounds. No
+kernel write, IPC entry copy, command submission, physical write, privilege
+change, or bootstrap operation is added by this discovery step.
 
 ## End-to-End Chain Status
 
@@ -117,11 +145,11 @@ GFX command submission, physical-write publication, privileges, or bootstrap.
 | Read-only acquisition path | **PASS** | Filza bridge plus USB forwarding; probe restored disabled after each bounded capture |
 | Kernelcache, GFX, SPTM, and TXM extraction | **PASS** | Offline analyzers accept all four extracted images |
 | RTBuddy object and segment layout | **PASS** | Live object chain, two descriptors, and physical/virtual/remap field roles resolved |
-| Existing GFX IORVBAR mapping | **OBJECT GRAPH PASS; RANGE FIX READY** | Runtime vtables and the existing `IOMemoryMap` pass; corrected descriptor-range fields await the next build |
+| Existing GFX IORVBAR mapping | **PASS** | Runtime vtables, linked map fields, descriptor count, and exact physical range `0x206050000/0x8` all passed on-device |
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
 | Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
-| Titan unrestricted physical write | **NOT REACHED / CLEAN DESCRIPTOR STOP** | Active kernel patchfinder and object traversal passed; stale descriptor field offsets stopped validation before MMIO or GFX submission |
+| Titan unrestricted physical write | **NOT REACHED / CLEAN PROCESS LOOKUP STOP** | IORVBAR resolution passed; stale `proc` name lookup stopped command-buffer setup before IPC entry copy or GFX submission |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
@@ -849,14 +877,35 @@ Consequences:
 - Do not continue into physrw construction, privilege changes, trust caches, or
   bootstrap installation from this probe route.
 
+### PROC_NAME_OFFSET_DISCOVERY_REQUIRED
+
+USB confirms that `backboardd` exists, while Titan's historical
+`proc_find_by_name` cannot locate it on XNU 25. The failure occurs before the
+user-client IPC entry is copied. The exact-target path must therefore derive a
+candidate name offset from the current Dopamine process instead of assuming
+`0x579`, then validate that the target name resolves unambiguously.
+
+Consequences:
+
+- Keep the historical fixed offsets only for existing non-probe targets.
+- Read no more than the reported `proc` size and use the exact ClearSword read
+  path in chunks of at most `0x20`.
+- Cap both candidate offsets and allproc traversal, and fail closed on an
+  invalid link or duplicate target process.
+- Record the discovered offset, target `proc`, pid, and traversal count before
+  attempting IPC-table inspection.
+- Treat a successful process lookup only as permission to inspect the target's
+  IPC table; it does not validate command queues, RTKit parsing, GFX ROP, or an
+  SPTM/TXM path.
+
 ## Next Steps
 
-1. Build and install the corrected descriptor-range probe.
+1. Build and install the bounded process-name discovery probe.
 2. Run that active probe once and recover
    `Documents/a15-ios26-active-probe.jsonl` after completion, process exit, or
    reboot.
-3. Require PASS results for descriptor length, range pointer, range count,
-   physical address, range length, and the linked `IOMemoryMap` fields.
+3. Require a unique `titan.proc-by-name PASS` for `backboardd`, including a
+   plausible pid, before interpreting any IPC-table result.
 4. Identify the last `PASS` and following `START`/`FAIL` pair before changing
    any later stage.
 5. Keep the normal jailbreak, physrw, privilege, trust-cache, and bootstrap
