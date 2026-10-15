@@ -538,6 +538,15 @@ has no direct branch cross-reference in decoded text. Indirect reachability is
 not excluded, and the values are not promoted to endpoint or permission
 identities.
 
+The v5 offline census narrows the next static comparison. SPTM contains one
+`GENTER #0` on both builds, while `GEXIT #0` grows from four sites on 21B91 to
+seven on 23A355. The newer image also directly references
+`validate_sptm_dispatch_table_id` and `validate_dispatch_endpoint_id`, and has
+more references to `dispatch_state_machine` and `genter_dispatch_entry`.
+These locations are suitable for a symmetric bounded call-graph comparison.
+They are not a proven remaining bypass branch, and no device logging at the
+protected boundary has been enabled.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It

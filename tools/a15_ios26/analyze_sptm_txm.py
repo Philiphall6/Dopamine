@@ -39,6 +39,7 @@ except ImportError as exc:  # pragma: no cover - depends on the analyst's host
 
 UINT64_MASK = (1 << 64) - 1
 APPLE_GENTER_BASE = 0x00201420
+APPLE_GEXIT_BASE = 0x00201400
 APPLE_GENTER_MASK = 0xFFFFFFE0
 
 
@@ -345,10 +346,18 @@ class MachOImage:
 
 
 def _decode_apple_genter_immediate(raw: bytes) -> int | None:
+    return _decode_apple_transfer_immediate(raw, APPLE_GENTER_BASE)
+
+
+def _decode_apple_gexit_immediate(raw: bytes) -> int | None:
+    return _decode_apple_transfer_immediate(raw, APPLE_GEXIT_BASE)
+
+
+def _decode_apple_transfer_immediate(raw: bytes, opcode_base: int) -> int | None:
     if len(raw) != 4:
         return None
     opcode = int.from_bytes(raw, byteorder="little")
-    if (opcode & APPLE_GENTER_MASK) != APPLE_GENTER_BASE:
+    if (opcode & APPLE_GENTER_MASK) != opcode_base:
         return None
     return opcode & 0x1F
 
@@ -508,6 +517,31 @@ def _collect_genter_entries(image: MachOImage) -> list[dict]:
                     image, instruction.address
                 ),
                 "window": image.window(instruction.address, before=8, after=8),
+            }
+        )
+    return entries
+
+
+def _collect_sptm_transfer_entries(
+    image: MachOImage, instruction_name: str
+) -> list[dict]:
+    decoder = (
+        _decode_apple_genter_immediate
+        if instruction_name == "genter"
+        else _decode_apple_gexit_immediate
+    )
+    entries = []
+    for instruction in image.instructions:
+        immediate = decoder(bytes(instruction.bytes))
+        if immediate is None:
+            continue
+        entries.append(
+            {
+                "address": instruction.address,
+                "immediate": immediate,
+                "opcode": bytes(instruction.bytes).hex(),
+                "function_candidate": image.function_start(instruction.address),
+                "window": image.window(instruction.address, before=5, after=5),
             }
         )
     return entries
@@ -703,6 +737,14 @@ def analyze_sptm(image: MachOImage) -> dict:
     result: dict = {
         "path": str(image.path),
         "imagebase": image.imagebase,
+        "guest_transfer_sequences": {
+            "genter": _collect_sptm_transfer_entries(image, "genter"),
+            "gexit": _collect_sptm_transfer_entries(image, "gexit"),
+        },
+        "dispatch_anchors": image.referenced_strings(
+            r"dispatch_table_lookup|dispatch_state_machine|"
+            r"genter_dispatch_entry|sptm_dispatch|endpoint_id"
+        ),
         "anchors": {},
         "papt_compressed_tables": {},
         "related_referenced_strings": image.referenced_strings(
@@ -1214,6 +1256,32 @@ def _append_tail_branch_descriptors(lines: list[str], entries: Sequence[dict]) -
         )
 
 
+def _append_transfer_census(lines: list[str], name: str, entries: Sequence[dict]) -> None:
+    immediate_counts = {}
+    for entry in entries:
+        immediate_counts[entry["immediate"]] = (
+            immediate_counts.get(entry["immediate"], 0) + 1
+        )
+    counts = ", ".join(
+        f"`#{immediate}`={count}"
+        for immediate, count in sorted(immediate_counts.items())
+    )
+    lines.append(
+        f"- `{name}` entries: {len(entries)}; immediates: "
+        + (counts or "none")
+    )
+    representatives = {}
+    for entry in entries:
+        representatives.setdefault(entry["immediate"], entry)
+    for entry in representatives.values():
+        lines.append(
+            f"- Representative `{name} #{entry['immediate']}`: "
+            f"`{_format_address(entry['address'])}`, opcode "
+            f"`{entry['opcode']}`"
+        )
+        _append_window(lines, entry.get("window", []))
+
+
 def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
     txm_static_ok = bool(
         txm["device_tree_trust_cache_range"].get("function")
@@ -1340,6 +1408,24 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
             f"- Image base: `{_format_address(sptm['imagebase'])}`",
         )
     )
+    lines.extend(("", "### Guest transfer instructions", ""))
+    transfers = sptm["guest_transfer_sequences"]
+    _append_transfer_census(lines, "genter", transfers.get("genter", []))
+    _append_transfer_census(lines, "gexit", transfers.get("gexit", []))
+
+    lines.extend(("", "### Dispatch diagnostic anchors", ""))
+    dispatch_anchors = sptm["dispatch_anchors"]
+    if not dispatch_anchors:
+        lines.append("- No directly referenced dispatch anchor")
+    for entry in dispatch_anchors:
+        references = ", ".join(
+            f"`{_format_address(reference['address'])}`"
+            for reference in entry["references"]
+        )
+        lines.append(
+            f"- `{entry['value']}` at "
+            f"`{_format_address(entry['address'])}`; references: {references}"
+        )
     for anchor, entries in sptm["anchors"].items():
         if not entries:
             lines.append(f"- Anchor `{anchor}`: missing")

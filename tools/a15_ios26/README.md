@@ -75,6 +75,8 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
   semantics
 - complete raw `x16` constants reconstructed from bounded TXM tail-branch
   wrappers
+- SPTM `GENTER`/`GEXIT` transfer counts and directly referenced dispatch
+  diagnostic anchors
 
 These results show patchfinder compatibility for the inspected paths. They do
 not provide the unrestricted physical-write primitive required by Dopamine's
@@ -92,6 +94,11 @@ The TXM wrapper reconstruction requires a complete 64-bit definition before a
 direct tail branch to the `SVC #0` thunk. Partial or dynamic `x16` setup remains
 unresolved. The resulting values are raw descriptors, not service names or
 authorization claims.
+
+SPTM transfer and dispatch results are also static. Diagnostic string
+cross-references can identify code clusters and validation deltas, but the
+analyzer does not equate a string name with a resolved handler or reachable
+runtime branch.
 
 The Titan report has the same limitation. A static PASS does not validate the
 live RTKit state, command-buffer setup, GFX ROP trigger, or physical-write

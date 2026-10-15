@@ -138,6 +138,15 @@ class EntrySequenceTests(unittest.TestCase):
             analyzer._decode_apple_genter_immediate(bytes.fromhex("00142000"))
         )
 
+    def test_decodes_apple_gexit_separately(self):
+        self.assertEqual(
+            analyzer._decode_apple_gexit_immediate(bytes.fromhex("00142000")),
+            0,
+        )
+        self.assertIsNone(
+            analyzer._decode_apple_gexit_immediate(bytes.fromhex("20142000"))
+        )
+
     def test_collects_only_svc_zero(self):
         image = analyzer.MachOImage.__new__(analyzer.MachOImage)
         image.instructions = [

@@ -114,6 +114,30 @@ not prove it is unreachable: an indirect reference or a runtime-computed
 target remains possible. No semantic endpoint names are assigned to these raw
 values.
 
+## SPTM Return and Validation Delta
+
+The v5 report adds a raw SPTM transfer census and direct cross-references for a
+small set of dispatch diagnostic strings:
+
+| Static item | 21B91 | 23A355 |
+| --- | ---: | ---: |
+| SPTM `GENTER #0` | 1 | 1 |
+| SPTM `GEXIT #0` | 4 | 7 |
+| `dispatch_table_lookup` references | 2 | 2 |
+| `dispatch_state_machine` references | 3 | 7 |
+| `genter_dispatch_entry` references | 1 | 2 |
+| `sptm_dispatch` references | 2 | 2 |
+| `endpoint_id` references | 3 | 3 |
+| `validate_sptm_dispatch_table_id` references | 0 | 2 |
+| `validate_dispatch_endpoint_id` references | 0 | 1 |
+
+The extra 23A355 `GEXIT` sites and named validator references are bounded
+control-flow comparison candidates. A missing diagnostic string on 21B91 does
+not prove the equivalent validation logic is absent, and an added string does
+not identify a bypass branch. The next comparison must recover function
+boundaries and callers around these references on both builds before assigning
+semantics.
+
 ## Result
 
 The high-level division of responsibility is continuous from iOS 17.1.1 to
@@ -155,6 +179,15 @@ The v4 artifacts add bounded direct-tail-branch provenance and complete raw
 | `ios17_1_1-symmetric/sptm-txm-static-report-v4.md` | `023C589FA9C1F59D8B8B8B2504946E212B10C8AEDBCB66EB937A0F7462027944` |
 | `sptm-txm-static-report-v4.json` | `99329CFB9419C273C6F541325CF1DEC0BE69955CE93E3232B621B3823237C770` |
 | `sptm-txm-static-report-v4.md` | `D798C5EF67CC22FA19F0140F9F93A3D85DDB0E07391EC8514FDB4A66E62B3993` |
+
+The v5 artifacts add the SPTM transfer and dispatch-anchor census:
+
+| v5 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v5.json` | `D17DB9D0C299DECC4B465B1C063E498302983C71CA51EB2622C3F11CE415A202` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v5.md` | `382D5EF0054EBCF4015F55564B75023ADC0B57CF2BBFE7133C9575623CEDB94A` |
+| `sptm-txm-static-report-v5.json` | `8BB5C33B082DB4CDAECE6F4730A92A2136B0403BF97DB17AF27F5959340ABBA1` |
+| `sptm-txm-static-report-v5.md` | `B74446AD9B4C18C3EB36BC98FB5B0B5BEA0D250F729AD8716159D8ECCEEAD5A5` |
 
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
@@ -204,12 +237,12 @@ and full analyzer result are recorded in
 `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`.
 
 The bounded `ADR` resolution, tagged frame-type policy normalization,
-entry-instruction census, and direct TXM tail-branch provenance are now
-implemented. Raw, `-v2`, `-v3`, and `-v4` reports remain separate. The next
-justified static step is to locate SPTM-side consumption and dispatch-table
-cross-references for the raw `x16` descriptor fields with the same rules on
-both builds. Static similarity still cannot establish selector, ABI, endpoint,
-or runtime-response identity.
+entry-instruction census, direct TXM tail-branch provenance, and SPTM transfer
+and dispatch-anchor census are now implemented. Raw through `-v5` reports
+remain separate. The next justified static step is a symmetric bounded call
+graph around the added 23A355 validator references and their 21B91
+counterparts. Static similarity still cannot establish selector, ABI,
+endpoint, bypass, or runtime-response identity.
 
 ## Sources
 

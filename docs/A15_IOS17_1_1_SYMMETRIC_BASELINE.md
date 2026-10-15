@@ -261,6 +261,25 @@ the second thunk is unreachable, map an SPTM handler, or execute a request.
 | `sptm-txm-static-report-v4.json` | `99329CFB9419C273C6F541325CF1DEC0BE69955CE93E3232B621B3823237C770` |
 | `sptm-txm-static-report-v4.md` | `D798C5EF67CC22FA19F0140F9F93A3D85DDB0E07391EC8514FDB4A66E62B3993` |
 
+## Symmetric analyzer v5 SPTM transfer census
+
+The v5 reports add SPTM-side `GENTER`/`GEXIT` counts and direct references to
+dispatch diagnostic strings. Both builds contain one SPTM `GENTER #0`.
+21B91 contains four `GEXIT #0` sites; 23A355 contains seven. The newer build
+also has direct references to the additional names
+`validate_sptm_dispatch_table_id` and `validate_dispatch_endpoint_id`.
+
+These are candidates for a bounded function and caller comparison, not a
+resolved bypass or runtime rejection. String absence does not prove logic
+absence.
+
+| v5 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v5.json` | `D17DB9D0C299DECC4B465B1C063E498302983C71CA51EB2622C3F11CE415A202` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v5.md` | `382D5EF0054EBCF4015F55564B75023ADC0B57CF2BBFE7133C9575623CEDB94A` |
+| `sptm-txm-static-report-v5.json` | `8BB5C33B082DB4CDAECE6F4730A92A2136B0403BF97DB17AF27F5959340ABBA1` |
+| `sptm-txm-static-report-v5.md` | `B74446AD9B4C18C3EB36BC98FB5B0B5BEA0D250F729AD8716159D8ECCEEAD5A5` |
+
 ## Created artifacts
 
 All extracted files and generated reports are under:
