@@ -179,8 +179,8 @@ the final indirect handler transfer:
 | --- | --- | --- |
 | `sptm_dispatch` pointer references | 2 | 3 |
 | Registration signing | `PACIZA x16` | `PACIZA x16` |
-| Common registrations | IDs `0`, `1`, `2`; values `2`, `4`, `8` | IDs `0`, `1`, `2`; values `2`, `4`, `8` |
-| Additional registration | Direct canonical-pointer table store | Conditional ID `0xa`, value `0x10`, plus a wrapper registration |
+| Common registrations | IDs `0`, `1`, `2`; permission masks `0x2`, `0x4`, `0x8` | IDs `0`, `1`, `2`; permission masks `0x2`, `0x4`, `0x8` |
+| Additional registration | Direct canonical-pointer table store | Conditional ID `0xa`, permission mask `0x10`, plus a wrapper registration |
 | Registrar storage | `XPACI`, then `{pointer, value}` store | `XPACI`, then `{pointer, value}` store |
 | State-machine transfer | `BRAA` | `BRAA` |
 | Endpoint handler transfer | Tail trampoline, then `BLRAAZ` | Tail trampoline, then `BLRAAZ` |
@@ -197,6 +197,47 @@ The authenticated-callback architecture is therefore continuous. The newer
 image expands registration topology, but this comparison finds no downgrade
 to an unauthenticated endpoint transfer and no missing PAC branch that could
 be carried forward as a bypass.
+
+## Registration Descriptors And Domain Masks
+
+The v8 report recovers immediate `x0` and `x2` arguments at the bounded
+registration calls instead of assigning semantics from call order alone:
+
+| Build | Call | Table ID (`w0`) | Domain permission mask (`x2`) |
+| --- | --- | ---: | ---: |
+| 21B91 | `0xfffffff0070731d0` | `0` | `0x2` |
+| 21B91 | `0xfffffff0070731e0` | `1` | `0x4` |
+| 21B91 | `0xfffffff0070731f0` | `2` | `0x8` |
+| 23A355 | `0xfffffff0270a6bbc` | `0` | `0x2` |
+| 23A355 | `0xfffffff0270a6bcc` | `1` | `0x4` |
+| 23A355 | `0xfffffff0270a6bdc` | `2` | `0x8` |
+| 23A355 | `0xfffffff0270a6c04` | `0xa` | `0x10` |
+| 23A355 | `0xfffffff0270cc21c` | dynamic from `x1` | dynamic from `x3` |
+
+The registrar stores a 24-byte descriptor: the `XPACI`-canonicalized callback
+at offset `0`, the `x2` value at offset `8`, and metadata at offset `16`. In
+the state machine, the value at offset `8` is shifted right by the current
+caller-domain index and bit zero is tested before the callback at offset `0`
+is accepted. This proves that `x2` is a domain permission bitset, not an event
+ID or a count. The common masks permit domain bits `1`, `2`, and `3`; the new
+23A355 mask `0x10` permits domain bit `4`. On 23A355, the transition metadata
+labels those domains `XNU`, `TXM`, `SK`, and `XNU_HIB`, respectively. This
+names the bitmap positions but does not infer additional privileges beyond
+the observed per-table dispatch permission.
+
+The dynamic 23A355 wrapper is the separate
+`register_sptm_iommu_dispatch_table` path. It forwards its table ID and
+permission mask from caller-supplied registers, so v8 deliberately retains
+those sources rather than collapsing them into one constant registration.
+Its later `{endpoint_table, index+1}` store belongs to endpoint lookup and is
+not the permission field above.
+
+The event matrix remains separate. Its event-entry stride is `0x20` on both
+builds, while the state-row stride grows from `0x180` on 21B91 to `0x1e0` on
+23A355, matching the event bound increase from `12` to `15`. The permission
+table keeps a table-class stride of `0x180` and a descriptor stride of `0x18`
+on both builds. These facts refine the topology comparison but do not identify
+a live selector, protected request, accepted response, or residual bypass.
 
 ## Result
 
@@ -269,6 +310,16 @@ transfer paths:
 | `sptm-txm-static-report-v7.json` | `A45A99602CADEFE4E121E4DC14362E5EAC9B467388886A8C86BC342595FFC76E` |
 | `sptm-txm-static-report-v7.md` | `A7FF36B66B90D5E5FBFFEA8E38EDC3051914DD601CEF794A1B669711BA40E910` |
 
+The v8 artifacts add bounded registration-argument reconstruction and preserve
+dynamic source-register arguments as unresolved:
+
+| v8 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v8.json` | `7A5D7448799CE2777FBC6E6E05D9EA332AEBD5A195AF7680BF7A84C8419A719F` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v8.md` | `CFFA1DCEDD2C54EDECA2601D508C1C171A1F9E98B8C89565A64FC08652A06279` |
+| `sptm-txm-static-report-v8.json` | `CB1465EFE7E855E43CACA55231A0F5F7C1A103F6EA1C6946253824704147882D` |
+| `sptm-txm-static-report-v8.md` | `221C2E9D088182A5ED7EFBA23EF2FAB11F68DE7AE748B6B674BCFA0FA08297AE` |
+
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
 `kernel.runtime_read_write`. Request generation, transmission, handler
@@ -319,10 +370,11 @@ and full analyzer result are recorded in
 The bounded `ADR` resolution, tagged frame-type policy normalization,
 entry-instruction census, direct TXM tail-branch provenance, SPTM transfer and
 dispatch-anchor census, bounded dispatch guard graph, and authenticated
-callback provenance are now implemented. Raw through `-v7` reports remain
-separate. The v7 graph confirms continuous PAC-protected callback dispatch and
-finds no residual bypass branch. Static similarity still cannot establish
-selector, ABI, endpoint, bypass, or runtime-response identity.
+callback provenance, and registration descriptor recovery are now implemented.
+Raw through `-v8` reports remain separate. The v8 graph confirms continuous
+PAC-protected callback dispatch, identifies the registered values as caller
+domain masks, and finds no residual bypass branch. Static similarity still
+cannot establish selector, ABI, endpoint, bypass, or runtime-response identity.
 
 ## Sources
 

@@ -805,6 +805,70 @@ def _bounded_function_instructions(
     return result
 
 
+def _register_index(instruction, operand) -> int | None:
+    if operand.type != capstone.CS_OP_REG:
+        return None
+    name = instruction.reg_name(operand.reg)
+    if len(name) < 2 or name[0] not in {"w", "x"} or not name[1:].isdigit():
+        return None
+    return int(name[1:])
+
+
+def _recover_immediate_argument(
+    image: MachOImage, call_address: int, register_index: int, limit: int = 16
+) -> dict:
+    call_index = image._instruction_index.get(call_address)
+    if call_index is None:
+        return {"value": None, "definition": None, "source_register": None}
+
+    for instruction in reversed(
+        image.instructions[max(0, call_index - limit) : call_index]
+    ):
+        if instruction.id == ARM64_INS_BL:
+            break
+        if not instruction.operands:
+            continue
+        if _register_index(instruction, instruction.operands[0]) != register_index:
+            continue
+
+        definition = {
+            "address": instruction.address,
+            "mnemonic": instruction.mnemonic,
+            "operands": instruction.op_str,
+        }
+        if (
+            instruction.mnemonic in {"mov", "movz"}
+            and len(instruction.operands) >= 2
+            and instruction.operands[1].type == capstone.CS_OP_IMM
+        ):
+            value = image._imm(instruction.operands[1])
+            destination_name = instruction.reg_name(
+                instruction.operands[0].reg
+            )
+            if destination_name.startswith("w"):
+                value &= 0xFFFFFFFF
+            return {
+                "value": value,
+                "definition": definition,
+                "source_register": None,
+            }
+
+        source_register = None
+        if (
+            instruction.mnemonic == "mov"
+            and len(instruction.operands) >= 2
+            and instruction.operands[1].type == capstone.CS_OP_REG
+        ):
+            source_register = instruction.reg_name(instruction.operands[1].reg)
+        return {
+            "value": None,
+            "definition": definition,
+            "source_register": source_register,
+        }
+
+    return {"value": None, "definition": None, "source_register": None}
+
+
 def _collect_nearby_calls(
     image: MachOImage, instructions: Sequence
 ) -> list[dict]:
@@ -818,7 +882,20 @@ def _collect_nearby_calls(
             first_target = target
         elif target != first_target:
             break
-        calls.append({"address": instruction.address, "target": target})
+        calls.append(
+            {
+                "address": instruction.address,
+                "target": target,
+                "arguments": {
+                    "x0": _recover_immediate_argument(
+                        image, instruction.address, 0
+                    ),
+                    "x2": _recover_immediate_argument(
+                        image, instruction.address, 2
+                    ),
+                },
+            }
+        )
     return calls
 
 
@@ -886,6 +963,14 @@ def _transfer_record(instruction) -> dict:
         "mnemonic": instruction.mnemonic,
         "operands": instruction.op_str,
     }
+
+
+def _format_recovered_argument(argument: dict) -> str:
+    if argument.get("value") is not None:
+        return f"0x{argument['value']:x}"
+    if argument.get("source_register"):
+        return "dynamic from `" + argument["source_register"] + "`"
+    return "unresolved"
 
 
 def _collect_authenticated_transfer_paths(
@@ -1748,7 +1833,9 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
             )
             calls = ", ".join(
                 f"`{_format_address(item['address'])}` -> "
-                f"`{_format_address(item['target'])}`"
+                f"`{_format_address(item['target'])}` "
+                f"(`x0`={_format_recovered_argument(item['arguments']['x0'])}, "
+                f"`x2`={_format_recovered_argument(item['arguments']['x2'])})"
                 for item in reference["nearby_calls"]
             )
             lines.append(

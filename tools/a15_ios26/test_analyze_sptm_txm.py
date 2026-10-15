@@ -4,6 +4,14 @@ import types
 import unittest
 
 import capstone
+from capstone.arm64 import (
+    ARM64_REG_W0,
+    ARM64_REG_W2,
+    ARM64_REG_X0,
+    ARM64_REG_X1,
+    ARM64_REG_X2,
+    ARM64_REG_X3,
+)
 
 import analyze_sptm_txm as analyzer
 
@@ -278,6 +286,7 @@ class DispatchMetadataTests(unittest.TestCase):
 
     def test_collects_signed_pointer_registration_context(self):
         x16 = 16
+        names = {ARM64_REG_W0: "w0", ARM64_REG_W2: "w2", x16: "x16"}
         image = analyzer.MachOImage.__new__(analyzer.MachOImage)
         image.instructions = [
             instruction(
@@ -286,14 +295,37 @@ class DispatchMetadataTests(unittest.TestCase):
                 "adr",
                 [reg(x16), imm(0x3000)],
             ),
-            instruction(0x1004, 1, "paciza", [reg(x16)], op_str="x16"),
-            instruction(0x1008, 1, "mov", [reg(1), reg(x16)], op_str="x1, x16"),
+            instruction(
+                0x1004,
+                1,
+                "paciza",
+                [reg(x16)],
+                op_str="x16",
+                register_names=names,
+            ),
+            instruction(
+                0x1008,
+                analyzer.ARM64_INS_MOV,
+                "mov",
+                [reg(ARM64_REG_W0), imm(1)],
+                op_str="w0, #1",
+                register_names=names,
+            ),
             instruction(
                 0x100C,
+                analyzer.ARM64_INS_MOV,
+                "mov",
+                [reg(ARM64_REG_W2), imm(4)],
+                op_str="w2, #4",
+                register_names=names,
+            ),
+            instruction(
+                0x1010,
                 analyzer.ARM64_INS_BL,
                 "bl",
                 [imm(0x2000)],
                 op_str="#0x2000",
+                register_names=names,
             ),
         ]
         image._instruction_index = {
@@ -309,6 +341,60 @@ class DispatchMetadataTests(unittest.TestCase):
 
         self.assertEqual(references[0]["nearby_auth"][0]["mnemonic"], "paciza")
         self.assertEqual(references[0]["nearby_calls"][0]["target"], 0x2000)
+        self.assertEqual(
+            references[0]["nearby_calls"][0]["arguments"]["x0"]["value"],
+            1,
+        )
+        self.assertEqual(
+            references[0]["nearby_calls"][0]["arguments"]["x2"]["value"],
+            4,
+        )
+
+    def test_preserves_dynamic_registration_argument_sources(self):
+        names = {
+            ARM64_REG_X0: "x0",
+            ARM64_REG_X1: "x1",
+            ARM64_REG_X2: "x2",
+            ARM64_REG_X3: "x3",
+        }
+        image = analyzer.MachOImage.__new__(analyzer.MachOImage)
+        image.instructions = [
+            instruction(
+                0x2000,
+                analyzer.ARM64_INS_MOV,
+                "mov",
+                [reg(ARM64_REG_X0), reg(ARM64_REG_X1)],
+                op_str="x0, x1",
+                register_names=names,
+            ),
+            instruction(
+                0x2004,
+                analyzer.ARM64_INS_MOV,
+                "mov",
+                [reg(ARM64_REG_X2), reg(ARM64_REG_X3)],
+                op_str="x2, x3",
+                register_names=names,
+            ),
+            instruction(
+                0x2008,
+                analyzer.ARM64_INS_BL,
+                "bl",
+                [imm(0x3000)],
+                op_str="#0x3000",
+                register_names=names,
+            ),
+        ]
+        image._instruction_index = {
+            item.address: i for i, item in enumerate(image.instructions)
+        }
+
+        x0 = analyzer._recover_immediate_argument(image, 0x2008, 0)
+        x2 = analyzer._recover_immediate_argument(image, 0x2008, 2)
+
+        self.assertIsNone(x0["value"])
+        self.assertEqual(x0["source_register"], "x1")
+        self.assertIsNone(x2["value"])
+        self.assertEqual(x2["source_register"], "x3")
 
     def test_collects_authenticated_tail_trampoline(self):
         image = analyzer.MachOImage.__new__(analyzer.MachOImage)

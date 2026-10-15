@@ -81,6 +81,8 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
   bounded comparison/conditional-branch guards
 - dispatch code-pointer materializations, nearby PAC and registration calls,
   and authenticated transfers in direct or one-hop tail paths
+- bounded `x0`/`x2` registration-argument reconstruction, preserving dynamic
+  source registers instead of assigning unsupported immediate values
 
 These results show patchfinder compatibility for the inspected paths. They do
 not provide the unrestricted physical-write primitive required by Dopamine's
@@ -103,6 +105,10 @@ SPTM transfer and dispatch results are also static. Diagnostic string
 cross-references can identify code clusters and validation deltas, but the
 analyzer does not equate a string name with a resolved handler or reachable
 runtime branch.
+
+Registration arguments are reported as raw values. The symmetric report's
+consumer analysis establishes that the stored `x2` value is a caller-domain
+permission bitset; it remains distinct from the state machine's event index.
 
 The Titan report has the same limitation. A static PASS does not validate the
 live RTKit state, command-buffer setup, GFX ROP trigger, or physical-write

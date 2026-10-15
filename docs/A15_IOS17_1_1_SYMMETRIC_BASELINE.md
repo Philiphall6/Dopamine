@@ -322,6 +322,34 @@ wrapper path. This is expanded topology, not an authentication downgrade.
 | `sptm-txm-static-report-v7.json` | `A45A99602CADEFE4E121E4DC14362E5EAC9B467388886A8C86BC342595FFC76E` |
 | `sptm-txm-static-report-v7.md` | `A7FF36B66B90D5E5FBFFEA8E38EDC3051914DD601CEF794A1B669711BA40E910` |
 
+## Symmetric analyzer v8 registration descriptors
+
+The v8 reports reconstruct the immediate table ID in `w0` and associated
+value in `x2` at each bounded registration call. The shared registrations are
+`(0, 0x2)`, `(1, 0x4)`, and `(2, 0x8)`. 23A355 additionally registers
+`(0xa, 0x10)` and has one wrapper whose arguments remain correctly recorded as
+dynamic from `x1` and `x3`.
+
+The registrar stores the callback and `x2` value in a 24-byte descriptor. The
+state machine shifts the stored value by the current caller-domain index and
+tests one bit before loading the callback. Therefore `x2` is a domain
+permission mask, not an event ID or count. The event-entry stride remains
+`0x20`; the state-row stride grows from `0x180` to `0x1e0` as the event space
+grows from 12 to 15 entries. This remains a static topology result and does not
+establish a live request or bypass.
+
+On 23A355, transition metadata names bits `1..4` as `XNU`, `TXM`, `SK`, and
+`XNU_HIB`. The dynamic wrapper is the IOMMU-table registration path; its
+arguments remain caller-derived and its endpoint-table store is distinct from
+the permission descriptor.
+
+| v8 artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v8.json` | `7A5D7448799CE2777FBC6E6E05D9EA332AEBD5A195AF7680BF7A84C8419A719F` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v8.md` | `CFFA1DCEDD2C54EDECA2601D508C1C171A1F9E98B8C89565A64FC08652A06279` |
+| `sptm-txm-static-report-v8.json` | `CB1465EFE7E855E43CACA55231A0F5F7C1A103F6EA1C6946253824704147882D` |
+| `sptm-txm-static-report-v8.md` | `221C2E9D088182A5ED7EFBA23EF2FAB11F68DE7AE748B6B674BCFA0FA08297AE` |
+
 ## Created artifacts
 
 All extracted files and generated reports are under:

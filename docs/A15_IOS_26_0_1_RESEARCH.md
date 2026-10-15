@@ -574,6 +574,24 @@ PAC-protected at the same structural stages. The added registration topology
 does not identify a reusable iOS 17 bypass branch, and the live protected
 boundary remains `NOT_REACHED`.
 
+The v8 offline report reconstructs the registration descriptors themselves.
+Both builds register table IDs `0`, `1`, and `2` with `x2` values `0x2`,
+`0x4`, and `0x8`; 23A355 adds table ID `0xa` with `0x10` and one dynamic
+wrapper (`x0` from `x1`, `x2` from `x3`). The state-machine consumer shifts
+the stored `x2` value by the current caller-domain index and tests bit zero.
+Consequently these values are domain permission masks, not event IDs or
+counts. The common masks permit domain bits `1`, `2`, and `3`; the new iOS 26
+mask permits domain bit `4`. The 23A355 transition metadata labels those bits
+`XNU`, `TXM`, `SK`, and `XNU_HIB`, respectively. The dynamic wrapper is the
+separate IOMMU dispatch-table registration path; its later endpoint-table
+store is not the permissions field.
+
+The event matrix is separate: its event stride remains `0x20`, while its state
+row grows from `0x180` on 21B91 to `0x1e0` on 23A355. The permission-table
+descriptor remains `0x18` bytes on both builds. This narrows the contract
+delta but does not change the live `NOT_REACHED` result, so no active SPTM/TXM
+request or new IPA belongs to this static phase.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It
