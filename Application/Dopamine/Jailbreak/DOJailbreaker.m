@@ -33,6 +33,7 @@
 #import <libjailbreak/basebin_gen.h>
 #import <CoreServices/LSApplicationProxy.h>
 #import <sys/utsname.h>
+#import <fcntl.h>
 #import "spawn.h"
 #import "clock_alarm.h"
 #import <IOSurface/IOSurfaceRef.h>
@@ -65,6 +66,32 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
 };
 
 @implementation DOJailbreaker
+
+static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString *detail)
+{
+    NSString *runID = NSProcessInfo.processInfo.environment[@"A15_ACTIVE_PROBE_RUN_ID"] ?: @"unknown";
+    NSDictionary *event = @{
+        @"schema": @"dopamine.a15-ios26.active-probe.v1",
+        @"run_id": runID,
+        @"timestamp": @([[NSDate date] timeIntervalSince1970]),
+        @"stage": stage ?: @"unknown",
+        @"status": status ?: @"unknown",
+        @"detail": detail ?: @"",
+    };
+    NSData *json = [NSJSONSerialization dataWithJSONObject:event options:0 error:nil];
+    if (!json) return;
+
+    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/a15-ios26-active-probe.jsonl"];
+    int fd = open(path.fileSystemRepresentation, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd < 0) return;
+    write(fd, json.bytes, json.length);
+    write(fd, "\n", 1);
+    fsync(fd);
+    close(fd);
+
+    NSString *line = [NSString stringWithFormat:@"[A15ACTIVE] %@ %@ %@", stage, status, detail ?: @""];
+    [[DOUIManager sharedInstance] sendLog:line debug:NO];
+}
 
 - (NSError *)gatherSystemInformation
 {
@@ -225,6 +252,102 @@ typedef NS_ENUM(NSInteger, JBErrorCode) {
     }
 
     return nil;
+}
+
+- (void)runA15IOS2601ActiveTitanProbeWithError:(NSError **)errOut
+{
+    *errOut = nil;
+    DOEnvironmentManager *environment = [DOEnvironmentManager sharedManager];
+    if (![environment isA15IOS2601ResearchTarget]) {
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{
+            NSLocalizedDescriptionKey: @"Active Titan probe rejected: this build is restricted to iPhone14,2 on iOS 26.0.1 (23A355)."
+        }];
+        return;
+    }
+
+    NSString *runID = NSUUID.UUID.UUIDString;
+    setenv("A15_ACTIVE_PROBE_RUN_ID", runID.UTF8String, 1);
+    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded");
+
+    A15ActiveProbeCheckpoint(@"xpf.gather", @"START", @"");
+    NSError *error = [self gatherSystemInformation];
+    if (error) {
+        A15ActiveProbeCheckpoint(@"xpf.gather", @"FAIL", error.localizedDescription);
+        *errOut = error;
+        return;
+    }
+    A15ActiveProbeCheckpoint(@"xpf.gather", @"PASS", @"kernel+sptm+txm offsets initialized");
+
+    DOExploit *kernelExploit = [DOExploitManager sharedManager].selectedKernelExploit;
+    DOExploit *titan = [DOExploitManager sharedManager].selectedPPLBypass;
+    A15ActiveProbeCheckpoint(@"selector.kernel", kernelExploit ? @"PASS" : @"FAIL", kernelExploit.displayName ?: @"none");
+    A15ActiveProbeCheckpoint(@"selector.titan", titan ? @"PASS" : @"FAIL", titan.displayName ?: @"none");
+    if (!kernelExploit || !titan || ![titan.name isEqualToString:@"Titan"]) {
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{
+            NSLocalizedDescriptionKey: @"Active probe requires a selected kernel exploit and the exact-build Titan candidate."
+        }];
+        return;
+    }
+
+    A15ActiveProbeCheckpoint(@"kernel.load", @"START", kernelExploit.displayName);
+    if ([kernelExploit load] != 0) {
+        NSString *detail = [NSString stringWithFormat:@"%s", dlerror() ?: "dlopen failed"];
+        A15ActiveProbeCheckpoint(@"kernel.load", @"FAIL", detail);
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey: detail}];
+        return;
+    }
+    A15ActiveProbeCheckpoint(@"kernel.load", @"PASS", kernelExploit.displayName);
+
+    A15ActiveProbeCheckpoint(@"kernel.run", @"START", kernelExploit.displayName);
+    if ([kernelExploit run] != 0) {
+        A15ActiveProbeCheckpoint(@"kernel.run", @"FAIL", kernelExploit.displayName);
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey: @"Kernel exploit failed during the active Titan probe."}];
+        return;
+    }
+    A15ActiveProbeCheckpoint(@"kernel.run", @"PASS", kernelExploit.displayName);
+
+    jbinfo_initialize_boot_constants();
+    libjailbreak_translation_init();
+    libjailbreak_IOSurface_primitives_init();
+    uint64_t kernelBase = kconstant(staticBase) + kconstant(slide);
+    uint64_t kernelMagic = kread64(kernelBase);
+    NSString *kernelDetail = [NSString stringWithFormat:@"base=0x%llx magic=0x%llx", kernelBase, kernelMagic];
+    if (kernelMagic != 0x100000cfeedfacfULL) {
+        A15ActiveProbeCheckpoint(@"kernel.primitive", @"FAIL", kernelDetail);
+        [kernelExploit cleanup];
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey: @"Kernel read primitive did not return a valid Mach-O header."}];
+        return;
+    }
+    A15ActiveProbeCheckpoint(@"kernel.primitive", @"PASS", kernelDetail);
+
+    A15ActiveProbeCheckpoint(@"titan.load", @"START", titan.displayName);
+    if ([titan load] != 0) {
+        NSString *detail = [NSString stringWithFormat:@"%s", dlerror() ?: "dlopen failed"];
+        A15ActiveProbeCheckpoint(@"titan.load", @"FAIL", detail);
+        [kernelExploit cleanup];
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedLoadingExploit userInfo:@{NSLocalizedDescriptionKey: detail}];
+        return;
+    }
+    A15ActiveProbeCheckpoint(@"titan.load", @"PASS", titan.displayName);
+
+    A15ActiveProbeCheckpoint(@"titan.run", @"START", @"entering staged Titan chain");
+    int titanResult = [titan run];
+    if (titanResult != 0) {
+        A15ActiveProbeCheckpoint(@"titan.run", @"FAIL", [NSString stringWithFormat:@"return=%d; inspect previous checkpoint", titanResult]);
+        [titan cleanup];
+        [kernelExploit cleanup];
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{
+            NSLocalizedDescriptionKey: @"Titan stopped at a validated stage. Read Documents/a15-ios26-active-probe.jsonl for the first failing checkpoint."
+        }];
+        return;
+    }
+
+    NSString *publishStatus = gPrimitives.physwritebuf ? @"PASS" : @"FAIL";
+    A15ActiveProbeCheckpoint(@"titan.physwrite.publish", publishStatus, @"probe stops before physrw construction and privilege changes");
+    A15ActiveProbeCheckpoint(@"probe.complete", @"PASS", @"Titan returned; no bootstrap or privilege stage executed");
+    if (!gPrimitives.physwritebuf) {
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{NSLocalizedDescriptionKey: @"Titan returned without publishing a physical-write primitive."}];
+    }
 }
 
 - (NSError *)buildPhysRWPrimitive

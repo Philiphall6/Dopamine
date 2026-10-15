@@ -1,9 +1,10 @@
 # A15 / iOS 26.0.1 Research Status
 
-This document tracks the diagnostic work toward understanding Dopamine's
-Titan/SPTM chain on iPhone14,2. It is not a compatibility declaration. The
-target remains unsupported and the application explicitly refuses to enter the
-jailbreak path on this exact device and OS combination.
+This document tracks the staged work toward understanding Dopamine's Titan/SPTM
+chain on iPhone14,2. It is not a jailbreak compatibility declaration. The full
+jailbreak path remains unsupported; the exact target may enter a bounded active
+Titan probe that stops before physrw construction, privilege changes, and the
+bootstrap.
 
 ## Target
 
@@ -11,8 +12,8 @@ jailbreak path on this exact device and OS combination.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `MAPPING_VALIDATED_TITAN_EXECUTION_BLOCKED`
-- Operating mode: bounded read-only observation and offline static analysis
+- Research state: `ACTIVE_TITAN_PROBE_SOURCE_READY`
+- Operating mode: exact-target staged execution with persistent checkpoints
 
 ## End-to-End Chain Status
 
@@ -22,22 +23,39 @@ jailbreak path on this exact device and OS combination.
 | Read-only acquisition path | **PASS** | Filza bridge plus USB forwarding; probe restored disabled after each bounded capture |
 | Kernelcache, GFX, SPTM, and TXM extraction | **PASS** | Offline analyzers accept all four extracted images |
 | RTBuddy object and segment layout | **PASS** | Live object chain, two descriptors, and physical/virtual/remap field roles resolved |
-| Existing GFX IORVBAR mapping | **VALIDATED** | One existing 8-byte `IOMemoryMap`; address recorded but never dereferenced |
+| Existing GFX IORVBAR mapping | **ACTIVE ADAPTATION** | The 8-byte `IOMemoryMap` is rediscovered and revalidated at runtime; no per-boot address is embedded |
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
-| Kernel read/write exploit primitive | **CANDIDATE / RUNTIME UNVERIFIED** | ClearSword and DarkSword declare support through 26.0.1; the device dry run selects ClearSword but deliberately does not call `exploit_init` |
-| Titan unrestricted physical write | **BLOCKED** | No command queue, GPU trigger, MMIO access, or physical write was executed |
+| Kernel read/write exploit primitive | **ACTIVE PROBE ENABLED / DEVICE RESULT PENDING** | The probe loads the selected ClearSword candidate and validates the kernel Mach-O header before Titan |
+| Titan unrestricted physical write | **ACTIVE PROBE ENABLED / DEVICE RESULT PENDING** | Titan records every major stage through the GFX ROP result and publishes no compatibility claim |
 | SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
-| A15/iOS 26 support declaration | **BLOCKED** | App guard returns unsupported before exploit selection |
+| A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
 
 ClearSword/DarkSword provide the kernel read/write candidate used through iOS
 26.0.1, and the device-side selector chooses ClearSword for this exact target.
-The current diagnostic intentionally stops before loading the framework or
-calling `exploit_init`, so it does not constitute runtime proof on iPhone14,2.
-Assuming that established primitive behaves on A15 as designed, the remaining
-architectural blocker is the SPTM/TXM protected-write path. Passing static
-patchfinders does not by itself bridge that final gap.
+The active probe now calls that candidate, validates the resulting kernel read,
+and enters Titan. Device execution is still required to determine the first
+runtime blocker; passing static patchfinders does not by itself bridge the
+SPTM/TXM gap.
+
+## Exact-target active probe
+
+The active path is restricted three times: Titan's metadata names only
+`iPhone14,2` plus build `23A355`, `titan_init` repeats the machine/version/build
+check, and the UI exposes the path only through
+`isA15IOS2601ResearchTarget`. Titan dynamically locates `gfx-asc`, validates the
+expected `AppleARMIODevice`, `IOGeneralMemoryDescriptor`, and `IOMemoryMap`
+vtables, follows the proven IORegistry collection chain, and requires
+`fMemory` linkage, zero `fOffset`, eight-byte `fLength`, and a valid kernel
+`fAddress` before reading the IORVBAR.
+
+Every stage appends one JSON object to
+`Documents/a15-ios26-active-probe.jsonl` and calls `fsync`. Consequently, a
+process termination or device restart leaves the last completed stage on disk.
+The route intentionally returns after Titan publishes its physical-write
+callback; it does not call Dopamine's physrw builder, privilege elevation,
+trust-cache, or bootstrap code.
 
 ## How the Published Titan Chain Works
 
@@ -60,13 +78,12 @@ The published Titan path has four architectural phases:
    trust-cache, developer-mode, translation, and page-protection operations;
    knowing their static addresses does not create the physical-write primitive.
 
-For iPhone14,2 on iOS 26.0.1, phases 1 and 2 are only partially represented by
-offline and bounded read-only evidence. ClearSword and DarkSword are packaged
-as kernel candidates and ClearSword is metadata-selected, but the current
-research guard stops before executing it or setting up GPU command buffers. No
-RTKit execution path, controlled mapping window, unrestricted physical write,
-or SPTM bypass has been established. The static TXM base and passing XPF
-relationships therefore improve the map of the chain but do not bypass TXM.
+For iPhone14,2 on iOS 26.0.1, phases 1 and 2 now have an exact-target active
+probe implementation. ClearSword is executed first, its kernel read is checked
+against the live Mach-O header, and Titan then advances one checkpoint at a
+time. No successful controlled mapping window, unrestricted physical write, or
+SPTM bypass has yet been observed on-device. The static TXM base and passing
+XPF relationships therefore remain evidence, not a bypass claim.
 
 ## Diagnostic Response Logging
 
@@ -75,25 +92,23 @@ input class, return status, and last completed stage. A process exit or reboot
 must be recorded as an interrupted stage rather than interpreted as a protocol
 response.
 
-On the current build, the iOS 26 guard returns before Titan command-buffer
-setup. Consequently there is no live GPU, RTKit-execution, SPTM, or TXM response
-to decode yet. The available response set is limited to target identification,
-offline patchfinder results, bounded IORegistry/RTBuddy reads, IOMemoryMap
-metadata, and the explicit Titan diagnostic refusal. Downstream response logging
-only becomes meaningful after a target-compatible kernel read/write primitive
-exists and each subsequent stage has been independently validated.
+The new source records a durable checkpoint immediately before every active
+boundary, including command-buffer setup, the IORVBAR read, firmware copying,
+both patchfinders, target-job mapping, and the GFX ROP trigger. Until the new IPA
+is run, these stages remain `DEVICE_RESULT_PENDING`; they must not be inferred
+from the earlier read-only captures.
 
 | Observable checkpoint | Current target result |
 |---|---|
-| Application support gate | `UNSUPPORTED_TARGET` before exploit selection |
-| Kernel exploit result | `NO_TARGET_COMPATIBLE_PRIMITIVE` |
-| Kernel patchfinder | `STATIC_PASS`; no runtime kernel context |
-| Titan iOS 26 guard | `DIAGNOSTIC_REFUSAL` before command-buffer setup |
+| Application support gate | `EXACT_ACTIVE_PROBE`; full jailbreak support remains false |
+| Kernel exploit result | `DEVICE_RESULT_PENDING`; ClearSword selected |
+| Kernel patchfinder | `STATIC_PASS`; active checkpoint added |
+| Titan iOS 26 guard | exact `iPhone14,2/23A355` gate plus runtime object validation |
 | RTBuddy/segment discovery | `READ_ONLY_PASS` from bounded capture |
 | GFX firmware patchfinder | `STATIC_PASS` on the extracted image |
-| GFX physical addresses and translation root | `NOT_RESOLVED_LIVE` |
-| Controlled mapping window | `NOT_ATTEMPTED` |
-| Titan `physwritebuf` publication | `NOT_REACHED` |
+| GFX physical addresses and translation root | `DEVICE_RESULT_PENDING` |
+| Controlled mapping window | `DEVICE_RESULT_PENDING` |
+| Titan `physwritebuf` publication | `DEVICE_RESULT_PENDING` |
 | Dopamine physical read/write construction | `NOT_REACHED` |
 | SPTM/TXM protected operations | `NOT_REACHED` |
 
@@ -185,11 +200,10 @@ The device result matches the offline model:
 - Titan command buffers stay `BLOCKED`; physical write and live SPTM/TXM
   response stay `NOT_REACHED`.
 
-The packaged Titan framework still declares support only for iOS `16.1` through
-`17.3.1`. Its Info.plist and Mach-O `LC_BUILD_VERSION` both now declare a
-minimum deployment target of iOS `16.1`. Although its historical device-family list contains A15, the exact
-iPhone14,2 / iOS 26.0.1 target remains excluded and the app-side research guard
-returns unsupported before exploit selection or GPU command-buffer setup.
+That phase-2 artifact packaged Titan only for iOS `16.1` through `17.3.1` and
+returned unsupported before exploit selection. The active-probe source retains
+that general range and adds one explicit `iPhone14,2/23A355` inclusion; this
+does not retroactively change the historical phase-2 result.
 
 Offline/VM validation regenerated both static reports from the extracted
 kernelcache, GFX, SPTM, and TXM images. The adapted iOS 26 kernel and GFX
@@ -696,45 +710,47 @@ same hashes as phases 4 and 5 because no protected boundary state changed.
   exact length, descriptor count, and comparative DeviceTree format, but it is
   not recorded as a live-proven value.
 
-None of these hypotheses is permission to invoke mapping methods, dereference
-MMIO, create a GPU command queue, or perform a write.
+These hypotheses remain unproven. The exact-target active probe now tests them
+under persistent stage logging; it does not broaden support to another device
+or build.
 
 ## Blockers
 
-### MAPPING_VALIDATED_TITAN_EXECUTION_BLOCKED
+### ACTIVE_TITAN_PROBE_SOURCE_READY
 
-The existing GFX IORVBAR mapping is proven without dereferencing it. Titan is
-still blocked because the legacy `IOMemoryMap::wireRange` signature resolves an
-impossible `+0x260` field offset on this kernel and is rejected as a false
-positive. The target-specific accessor proves `fAddress=+0x28`, but the later
-AGX command, fence, and execution relationships are not yet an end-to-end
-physical-write primitive.
+The legacy `IOMemoryMap::wireRange` signature resolves an impossible `+0x260`
+field offset and remains rejected. The active path instead rediscovers the
+already existing eight-byte map and validates `fAddress=+0x28` plus the linked
+object graph before using it. The first runtime blocker after that point is not
+known until the new IPA produces its JSONL trace.
 
 Consequences:
 
-- Do not dereference the physical register address.
-- Do not invoke `mapDeviceMemoryWithIndex` or create a new mapping.
-- Do not set up Titan GPU command queues on iOS 26.
-- Do not enable Titan for A15 / iOS 26.0.1 in `Info.plist`.
-- Do not perform kernel, GPU, page-table, or MMIO writes.
+- Never reuse a per-boot kernel virtual address from a previous capture.
+- Never create a replacement IORVBAR mapping; use only the validated existing map.
+- Reject every machine/build except iPhone14,2/23A355.
+- Treat the last durable checkpoint as the boundary reached, not as proof that
+  the next operation completed.
+- Do not continue into physrw construction, privilege changes, trust caches, or
+  bootstrap installation from this probe route.
 
 ## Next Steps
 
-1. Validate the target-specific `IOMemoryMap` accessor anchor against
-   additional iOS 26 kernels before treating it as a family-wide finder.
-2. Validate the resolved RTBuddy segment-field order against an additional
-   iOS 26 kernel before treating it as a family-wide layout.
-3. Validate each remaining iOS 26 AGX patchfinder result against the target
-   kernel and GFX firmware without running a GPU command queue.
-4. Keep all live probes count-bounded, read-only, and followed by restoration
-   of the disabled configuration.
-5. Review each later Titan stage in isolation before considering any on-device
-   execution.
-6. Change support metadata only after a separate end-to-end safety and
-   correctness review.
+1. Build and install the exact-target IPA.
+2. Run the active probe once and recover
+   `Documents/a15-ios26-active-probe.jsonl` after completion, process exit, or
+   reboot.
+3. Identify the last `PASS` and following `START`/`FAIL` pair before changing
+   any later stage.
+4. Compare the runtime patchfinder and RTKit values with the 23A355 offline
+   reports.
+5. Keep the normal jailbreak, physrw, privilege, trust-cache, and bootstrap
+   stages disabled until Titan's physical-write publication is independently
+   reproduced.
 
 ## Application Policy
 
 On iPhone14,2 with A15 and iOS 26.0.1, Dopamine presents this target as a
-research target and returns unsupported before exploit selection. This policy
-is checked by `tools/a15_ios26/check_research_integration.py`.
+research target and routes it only to the bounded active Titan probe. General
+support still returns false. This policy is checked by
+`tools/a15_ios26/check_research_integration.py`.

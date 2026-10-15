@@ -4,8 +4,9 @@
 `BaseBin/XPF/src/sptm_txm.c` against extracted firmware images. It is intended
 to distinguish a patchfinder compatibility problem from a missing SPTM bypass.
 
-The tool is diagnostic-only. It does not patch a firmware image, change
-Dopamine's supported-device metadata, or execute an exploit.
+The offline analyzer does not patch a firmware image or execute an exploit.
+The app also contains a separate, exact-target active Titan probe for
+`iPhone14,2` on build `23A355`; that route is not exercised by this analyzer.
 
 `analyze_titan.py` separately reproduces the masked instruction searches in
 Titan's kernel and GFX patchfinders. It understands the `rkosftab` container
@@ -122,11 +123,14 @@ addresses; those values are evidence for that capture and are never reusable
 offsets. Even with a `VALIDATED` IORVBAR mapping, the analyzer keeps Titan
 execution blocked until the later AGX and physical-write stages are validated.
 
-## Diagnostic integration policy
+## Active-probe integration policy
 
-The app-side research status and its support guard are documented in
-`docs/A15_IOS_26_0_1_RESEARCH.md`. Check that A15/iOS 26.0.1 remains excluded
-from Titan support metadata and blocked before GPU command-buffer setup with:
+The app-side research status and its target gate are documented in
+`docs/A15_IOS_26_0_1_RESEARCH.md`. Titan remains outside the general iOS 26
+range and receives one build-and-device-specific metadata include. The probe
+rediscovers the existing IORVBAR mapping on each run, writes fsync-backed JSONL
+checkpoints, and stops before Dopamine constructs physrw, changes privileges,
+or installs a bootstrap. Validate these constraints with:
 
 ```sh
 python tools/a15_ios26/check_research_integration.py

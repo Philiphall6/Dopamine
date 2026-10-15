@@ -139,4 +139,4 @@
 "Research_Stage_OSDictionary" = "3. OSDictionary layout: proven";
 "Research_Stage_IORegistry" = "4. IODeviceMemory chain: proven";
 "Research_Stage_IORVBAR" = "5. Existing IORVBAR mapping: validated; Titan execution blocked";
-"Research_Button_Run" = "Run Diagnostics";
+"Research_Button_Run" = "Run Titan Probe";

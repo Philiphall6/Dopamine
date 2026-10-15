@@ -132,5 +132,5 @@
 "Research_Stage_OSDictionary" = "3. Structure OSDictionary : prouvée";
 "Research_Stage_IORegistry" = "4. Chaîne IODeviceMemory : prouvée";
 "Research_Stage_IORVBAR" = "5. Mapping IORVBAR existant : validé ; exécution Titan bloquée";
-"Research_Button_Run" = "Lancer le diagnostic";
+"Research_Button_Run" = "Lancer la sonde Titan";
 

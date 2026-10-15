@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check that the A15/iOS 26.0.1 integration stays diagnostic-only."""
+"""Check the exact-target A15/iOS 26.0.1 active Titan probe integration."""
 
 from __future__ import annotations
 
@@ -38,11 +38,30 @@ def main() -> int:
                 not (start <= TARGET_VERSION <= end),
                 f"Titan flavor {flavor_name!r} enables A15/iOS 26.0.1",
             )
+        exact_includes = [
+            entry
+            for entry in flavor.get("DPSupportInclude", [])
+            if entry.get("Devices") == ["iPhone14,2"]
+            and "23A355" in entry.get("Builds", [])
+        ]
+        require(
+            len(exact_includes) == 1,
+            f"Titan flavor {flavor_name!r} is missing the exact iPhone14,2/23A355 include",
+        )
+        require(
+            all(
+                "23A355" not in entry.get("Builds", [])
+                or entry.get("Devices") == ["iPhone14,2"]
+                for entry in flavor.get("DPSupportInclude", [])
+            ),
+            "build 23A355 is enabled outside the exact iPhone14,2 rule",
+        )
 
     environment = (ROOT / "Application/Dopamine/Jailbreak/DOEnvironmentManager.m").read_text()
     project = (ROOT / "Application/Dopamine.xcodeproj/project.pbxproj").read_text()
     settings = (ROOT / "Application/Dopamine/UI/Settings/DOSettingsController.m").read_text()
     main_view = (ROOT / "Application/Dopamine/UI/DOMainViewController.m").read_text()
+    jailbreaker = (ROOT / "Application/Dopamine/Jailbreak/DOJailbreaker.m").read_text()
     titan = (ROOT / "Application/Dopamine/Exploits/Titan/exploit/titan.m").read_text()
     kernel_patchfinder = (
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/kernel_patchfinder.c"
@@ -84,6 +103,33 @@ def main() -> int:
     require("Research_Stage_OSDictionary" in settings, "missing OSDictionary status")
     require("Research_Stage_IORVBAR" in settings, "missing in-app research status")
     require("Research_Button_Run" in main_view, "missing research diagnostic button")
+    require(
+        "[self startA15ActiveTitanProbe]" in main_view,
+        "exact research target does not route to the active Titan probe",
+    )
+    active_start = jailbreaker.find("- (void)runA15IOS2601ActiveTitanProbeWithError")
+    active_end = jailbreaker.find("- (NSError *)buildPhysRWPrimitive", active_start)
+    require(active_start >= 0 and active_end > active_start, "missing bounded active probe")
+    active_body = jailbreaker[active_start:active_end]
+    for marker in (
+        "isA15IOS2601ResearchTarget",
+        "A15_ACTIVE_PROBE_RUN_ID",
+        'A15ActiveProbeCheckpoint(@"kernel.run"',
+        'A15ActiveProbeCheckpoint(@"kernel.primitive"',
+        'A15ActiveProbeCheckpoint(@"titan.run"',
+        'A15ActiveProbeCheckpoint(@"titan.physwrite.publish"',
+        "Documents/a15-ios26-active-probe.jsonl",
+        "gPrimitives.physwritebuf",
+    ):
+        require(marker in active_body or marker in jailbreaker, f"active probe is missing marker: {marker}")
+    for forbidden in (
+        "buildPhysRWPrimitive",
+        "elevatePrivileges",
+        "prepareBootstrap",
+        "loadBasebinTrustcache",
+        "ensureJailbreakRootExists",
+    ):
+        require(forbidden not in active_body, f"active probe crosses bounded stop into {forbidden}")
     diagnostic_start = main_view.find("- (void)startResearchDiagnostics")
     diagnostic_end = main_view.find("- (void)viewWillAppear", diagnostic_start)
     require(
@@ -194,10 +240,7 @@ def main() -> int:
         "CFRelease(standardSurface)" in diagnostic_body,
         "standard IOSurface is not released",
     )
-    require(
-        "MAPPING_VALIDATED_TITAN_EXECUTION_BLOCKED" in report,
-        "report does not record the current diagnostic blocker",
-    )
+    require("ACTIVE_TITAN_PROBE_SOURCE_READY" in report, "report does not record the active-probe state")
     for marker in ("0xfffffff007aaaf58", "dictionary=+0x20", "16-byte"):
         require(marker in report, f"report is missing OSDictionary evidence: {marker}")
     require("fAddress=+0x28" in report, "report is missing the validated map offset")
@@ -233,6 +276,23 @@ def main() -> int:
     queue_setup = titan.find("titan_setup_command_buffers()", titan_run)
     require(guard >= 0, "Titan iOS 26 guard is missing")
     require(queue_setup >= 0 and guard < queue_setup, "Titan guard no longer precedes command-buffer setup")
+    for marker in (
+        "titan_resolve_ios26_iorvbar_mapping",
+        'strcmp(machine, "iPhone14,2") == 0',
+        'strcmp(build, "23A355") == 0',
+        "kIOS2601AppleARMIODeviceVtable",
+        "kIOS2601IOGeneralMemoryDescriptorVtable",
+        "kIOS2601IOMemoryMapVtable",
+        "fMemory != descriptor",
+        "fOffset != 0",
+        "fLength != 8",
+        'titan_checkpoint(@"titan.rop-trigger"',
+    ):
+        require(marker in titan, f"active Titan adaptation is missing marker: {marker}")
+    require(
+        "0xffffffec9be40000" not in titan,
+        "per-boot IORVBAR kernel mapping was hard-coded into Titan",
+    )
     require(
         "fAddress == 0 || fAddress > 0x100" in kernel_patchfinder,
         "legacy IOMemoryMap offset candidates are no longer range-checked",
@@ -297,8 +357,8 @@ def main() -> int:
         require(forbidden not in macho_preflight, f"Mach-O preflight can execute target code via {forbidden}")
 
     print(
-        "OK: A15/iOS 26.0.1 remains diagnostic-only; "
-        "read-only IOSurface lifecycle bounded; IORVBAR mapping validated and Titan execution blocked"
+        "OK: exact iPhone14,2/23A355 active Titan probe enabled; "
+        "persistent checkpoints present; privilege and bootstrap stages remain blocked"
     )
     return 0
 

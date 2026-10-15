@@ -153,7 +153,7 @@
         } completion:nil];
         
         if ([[DOEnvironmentManager sharedManager] isA15IOS2601ResearchTarget]) {
-            [self startResearchDiagnostics];
+            [self startA15ActiveTitanProbe];
         }
         else {
             [self startJailbreak];
@@ -184,6 +184,29 @@
                 [self setupUpdateAvailable:NO];
             });
         }
+    });
+}
+
+- (void)startA15ActiveTitanProbe
+{
+    DOJailbreaker *jailbreaker = [[DOJailbreaker alloc] init];
+    [[DOUIManager sharedInstance] startLogCapture];
+    self.jailbreakBtn.enabled = NO;
+
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+        NSError *error = nil;
+        [jailbreaker runA15IOS2601ActiveTitanProbeWithError:&error];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.jailbreakBtn.enabled = YES;
+            if (error) {
+                [[DOUIManager sharedInstance] sendLog:[NSString stringWithFormat:@"Active Titan probe stopped: %@", error.localizedDescription] debug:NO];
+                [self.navigationController pushViewController:[[DOLogCrashViewController alloc] initWithTitle:error.localizedDescription] animated:YES];
+            }
+            else {
+                [[DOUIManager sharedInstance] sendLog:@"Active Titan probe completed. No privilege or bootstrap stages were executed." debug:NO];
+                [[DOUIManager sharedInstance] completeJailbreak];
+            }
+        });
     });
 }
 
