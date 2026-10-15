@@ -152,8 +152,10 @@ Run the existing static analyzer unchanged:
 | `txm.iphoneos.release.bin` | 360,608 | `D5C308F637C0FDB62C6776DCCF60C3AA9152F057ADD4D63049C01D08C953C87B` |
 | `sptm-txm-static-report.json` | 35,475 | `5AF81D7B5355C356252D380D7E35AEC10DC92C1934CE1A20F6CAABEBB52398E8` |
 | `sptm-txm-static-report.md` | 17,435 | `8695AA2750F348ECCF189805AF8CE22608E91534AE7D82C42258294B78143A7A` |
+| `sptm-txm-static-report-v2.json` | 35,692 | `8EF8EBFF58B338F797178210FA9A0DA4E7EBA95A64598949F4F912DB199B5E34` |
+| `sptm-txm-static-report-v2.md` | 17,625 | `86C04F1A9E3A3D2D50FBBFE034717D5F55F1EEFC48C93B6435ED69B0AEE82C9D` |
 
-## Same-analyzer result
+## Original same-analyzer baseline
 
 The unmodified `tools/a15_ios26/analyze_sptm_txm.py` completed successfully on
 the 21B91 triplet. This establishes tool-level reproducibility, but its report
@@ -190,22 +192,33 @@ The three incomplete fields have concrete explanations:
 These are analysis-model differences. They do not demonstrate a failed or
 successful protected SPTM/TXM request, because no firmware component was run.
 
-## Minimal analyzer deltas
+## Normalized analyzer v2 result
 
-The current analyzer can be reused unchanged for a strict first pass. For a
-normalized two-version comparison, the smallest justified changes are:
+The original outputs above remain unchanged. A second pair of reports with the
+`-v2` suffix records the bounded normalization implemented afterward:
 
-- Add `ADR` support to `MachOImage.resolve_data_reference` while preserving
-  the existing register-write and bounded-backtracking checks.
-- Represent frame-type policy as a tagged result with at least
-  `immediate_bitmask` (21B91) and `descriptor_table` (23A355), instead of
-  requiring the iOS 26 global table for every version.
-- Parameterize report title, product, build, input hashes, and schema version.
-- Keep raw findings and normalized findings separate so an improved heuristic
-  cannot silently rewrite the original same-analyzer baseline.
+- `MachOImage.resolve_data_reference` now handles direct `ADR` producers while
+  retaining the bounded register-write walk.
+- `frame_type_policy` is tagged as `immediate_bitmask` or `descriptor_table`.
+- The report title is version-neutral.
+- The original and normalized reports remain separate artifacts.
+
+| Check | 21B91 v2 | 23A355 v2 |
+| --- | --- | --- |
+| TXM XPF relationships | `PASS` | `PASS` |
+| SPTM-image XPF relationships | `PASS` | `PASS` |
+| Kernel-side SPTM relationships | `PASS` | `PASS` |
+
+On 21B91, the trust-cache root resolves to `0xfffffff0170104b8` and
+developer-mode storage resolves to `0xfffffff017058a26`. Its frame-type policy
+loads the type byte at offset `2`, bounds it to `20`, and tests masks
+`0x00060100` and `0x00180200`. On 23A355, the policy remains a descriptor table
+with `0x60`-byte records and a policy byte at offset `1`.
 
 No exploit, selector fabrication, protected call, memory write, or support
-metadata widening is needed for these improvements.
+metadata widening was used. `PASS` means that the requested static
+relationships were resolved; it does not mean a protected request ran or that
+SPTM/TXM accepted one.
 
 ## Created artifacts
 

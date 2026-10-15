@@ -41,7 +41,7 @@ provenance is the Apple IPSW `BuildManifest.plist`, which identifies `d63ap`,
 | Dispatch | SPTM routes subsystem IDs through dispatch tables; TXM is subsystem 1 | Dispatch-related behavior is consistent with the retained component split, but the iOS 26 dispatch table has not been mapped by the current analyzer | Do not assume selector identity |
 | Page ownership | PAPT range management resolves; frame types use immediate bit masks | PAPT range management resolves; frame types use a global descriptor table with `0x60`-byte records | Confirmed continuity with a changed representation |
 | Kernel integration | `sptm_get_page_table_refcnt`, `libsptm_init`, PAPT globals, and `SPTMArgs` resolve; descriptor-table fields are absent | `libsptm_init`, `sptm_args`, page-table refcount helper, and descriptor-table relationships resolve | Same roles, different frame-type policy model |
-| TXM role | Trust-cache and developer-mode candidates are found, but direct `ADR` chains prevent final address resolution | Trust-cache root, developer-mode storage, and license relationships resolve | Architectural continuity; analyzer coverage differs |
+| TXM role | Trust-cache root and developer-mode storage resolve through direct `ADR` chains | Trust-cache root, developer-mode storage, and license relationships resolve | Strong static continuity |
 | Runtime request | No request generated or transmitted by this project | No request generated or transmitted by this project | `NOT_REACHED` |
 | Runtime response | No handler dispatch or response received | No handler dispatch or response received | `NOT_REACHED` |
 
@@ -64,15 +64,23 @@ reference-count helper used by the current Dopamine static analysis.
 
 The high-level division of responsibility is continuous from iOS 17.1.1 to
 iOS 26.0.1: SPTM owns protected translation and frame-type policy, while TXM
-owns code-signing and trust decisions. The same analyzer reports SPTM `PASS`
-for both builds, TXM `INCOMPLETE` on 21B91 versus `PASS` on 23A355, and kernel
-integration `INCOMPLETE` on 21B91 versus `PASS` on 23A355.
+owns code-signing and trust decisions. The normalized v2 analyzer reports
+`PASS` for TXM, the SPTM image, and kernel integration on both builds.
 
-The incomplete 21B91 results have bounded static explanations. Its TXM uses
-direct `ADR` chains not handled by the current resolver, and its refcount helper
-tests frame types with immediate bit masks rather than the iOS 26 global
-descriptor table. These are analyzer and representation differences, not
-evidence of a protected-component rejection.
+The former incomplete 21B91 results had bounded static explanations. Direct
+`ADR` chains now resolve the trust-cache root and developer-mode storage. Its
+refcount helper is represented as `immediate_bitmask`, with masks
+`0x00060100` and `0x00180200`; the 23A355 helper is represented as
+`descriptor_table`, with `0x60`-byte records and a policy byte at offset `1`.
+This normalization preserves the architectural difference instead of
+inventing an iOS 17 descriptor table.
+
+| Normalized artifact | SHA-256 |
+| --- | --- |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v2.json` | `8EF8EBFF58B338F797178210FA9A0DA4E7EBA95A64598949F4F912DB199B5E34` |
+| `ios17_1_1-symmetric/sptm-txm-static-report-v2.md` | `86C04F1A9E3A3D2D50FBBFE034717D5F55F1EEFC48C93B6435ED69B0AEE82C9D` |
+| `sptm-txm-static-report-v2.json` | `5E1BB0D9C7B8ED42288639F78B9AD1031E0B03C418F2E277B205D3876676BDE8` |
+| `sptm-txm-static-report-v2.md` | `D800F9D162CB57493B0CA4544726F57588E537AF6EE02480C280871427652141` |
 
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
@@ -121,10 +129,11 @@ provenance, BuildManifest identities, hashes, reproducible Windows commands,
 and full analyzer result are recorded in
 `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`.
 
-The next justified analyzer work is to add bounded `ADR` resolution and model
-frame-type policy as either `immediate_bitmask` or `descriptor_table`. Raw and
-normalized reports must remain separate. Even after that normalization, static
-similarity cannot establish selector, ABI, or runtime-response identity.
+The bounded `ADR` resolution and tagged frame-type policy normalization are now
+implemented. Raw reports remain separate from the `-v2` reports. The next
+justified static step is to compare the SPTM/TXM entry and dispatch sequences
+with the same instruction-level rules on both builds. Static similarity still
+cannot establish selector, ABI, or runtime-response identity.
 
 ## Sources
 
@@ -139,5 +148,7 @@ similarity cannot establish selector, ABI, or runtime-response identity.
 - https://gist.github.com/asdfugil/101ae32734938cf2c186ff330fba1e97
 - `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`
 - `outputs/iphone-system/ios17_1_1-symmetric/sptm-txm-static-report.json`
+- `outputs/iphone-system/ios17_1_1-symmetric/sptm-txm-static-report-v2.json`
 - `outputs/iphone-system/sptm-txm-static-report.json`
+- `outputs/iphone-system/sptm-txm-static-report-v2.json`
 - `outputs/iphone-system/response-trace-v2.json`

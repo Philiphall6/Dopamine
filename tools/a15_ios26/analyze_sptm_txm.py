@@ -264,6 +264,8 @@ class MachOImage:
         for previous in reversed(self.instructions[max(0, index - 100) : index]):
             if not self._writes_register(previous, register):
                 continue
+            if previous.id == ARM64_INS_ADR and len(previous.operands) >= 2:
+                return (self._imm(previous.operands[1]) + offset) & UINT64_MASK
             if previous.id == ARM64_INS_ADRP and len(previous.operands) >= 2:
                 return (self._imm(previous.operands[1]) + offset) & UINT64_MASK
             if previous.id == ARM64_INS_ADD and len(previous.operands) >= 3:
@@ -352,6 +354,77 @@ def _is_plain_str(instruction) -> bool:
     return instruction.id == ARM64_INS_STR and any(
         operand.type == capstone.CS_OP_MEM for operand in instruction.operands
     )
+
+
+def _collect_immediate_mask_policy(
+    image: MachOImage, frame_type_source_load
+) -> dict | None:
+    source_index = image._instruction_index[frame_type_source_load.address]
+    constants: dict[int, int] = {}
+    mask_tests = []
+    max_frame_type = None
+    frame_type_register = frame_type_source_load.operands[0].reg
+    for instruction in image.instructions[source_index + 1 : source_index + 41]:
+        operands = instruction.operands if instruction.id != 0 else []
+        if (
+            instruction.mnemonic == "cmp"
+            and len(operands) >= 2
+            and operands[0].type == capstone.CS_OP_REG
+            and operands[0].reg == frame_type_register
+            and operands[1].type == capstone.CS_OP_IMM
+        ):
+            max_frame_type = int(operands[1].imm)
+        elif (
+            instruction.mnemonic == "mov"
+            and len(operands) >= 2
+            and operands[0].type == capstone.CS_OP_REG
+            and operands[1].type == capstone.CS_OP_IMM
+        ):
+            constants[operands[0].reg] = int(operands[1].imm) & 0xFFFFFFFF
+            continue
+        elif (
+            instruction.mnemonic == "movk"
+            and len(operands) >= 2
+            and operands[0].type == capstone.CS_OP_REG
+            and operands[1].type == capstone.CS_OP_IMM
+        ):
+            register = operands[0].reg
+            shift = int(operands[1].shift.value)
+            field_mask = (0xFFFF << shift) & 0xFFFFFFFF
+            immediate = (int(operands[1].imm) << shift) & field_mask
+            constants[register] = (
+                constants.get(register, 0) & ~field_mask
+            ) | immediate
+            continue
+        elif instruction.mnemonic == "tst":
+            constant_operands = [
+                operand
+                for operand in operands
+                if operand.type == capstone.CS_OP_REG
+                and operand.reg in constants
+            ]
+            if constant_operands:
+                mask_tests.append(
+                    {
+                        "instruction": instruction.address,
+                        "mask": constants[constant_operands[-1].reg],
+                    }
+                )
+                if len(mask_tests) == 2:
+                    break
+
+        if operands and operands[0].type == capstone.CS_OP_REG:
+            constants.pop(operands[0].reg, None)
+
+    if not mask_tests:
+        return None
+    return {
+        "kind": "immediate_bitmask",
+        "frame_type_source_load": frame_type_source_load.address,
+        "frame_type_source_offset": 2,
+        "max_frame_type": max_frame_type,
+        "mask_tests": mask_tests,
+    }
 
 
 def analyze_txm(image: MachOImage) -> dict:
@@ -684,6 +757,18 @@ def _analyze_refcnt_dependents(image: MachOImage, function: int) -> dict:
             return None
         return image.resolve_data_reference(loads[index].address)
 
+    frame_type_source_load = next(
+        (
+            instruction
+            for instruction in image.instructions[start_index : start_index + 256]
+            if instruction.mnemonic == "ldrb"
+            and any(
+                operand.type == capstone.CS_OP_MEM and operand.mem.disp == 2
+                for operand in instruction.operands
+            )
+        ),
+        None,
+    )
     ldrb_one = next(
         (
             instruction
@@ -699,6 +784,7 @@ def _analyze_refcnt_dependents(image: MachOImage, function: int) -> dict:
     frame_type_load = None
     frame_type_params = None
     descriptor_size = None
+    frame_type_policy: dict = {"kind": "unresolved"}
     if ldrb_one is not None:
         frame_type_load = image.previous_instruction(
             ldrb_one.address,
@@ -716,6 +802,27 @@ def _analyze_refcnt_dependents(image: MachOImage, function: int) -> dict:
                 and size_instruction.operands[1].type == capstone.CS_OP_IMM
             ):
                 descriptor_size = int(size_instruction.operands[1].imm)
+        if frame_type_params is not None and descriptor_size is not None:
+            frame_type_policy = {
+                "kind": "descriptor_table",
+                "frame_type_source_load": (
+                    frame_type_source_load.address
+                    if frame_type_source_load is not None
+                    else None
+                ),
+                "frame_type_source_offset": 2,
+                "table": frame_type_params,
+                "descriptor_size": descriptor_size,
+                "policy_load": ldrb_one.address,
+                "policy_byte_offset": 1,
+            }
+
+    if frame_type_policy["kind"] == "unresolved" and frame_type_source_load:
+        immediate_policy = _collect_immediate_mask_policy(
+            image, frame_type_source_load
+        )
+        if immediate_policy is not None:
+            frame_type_policy = immediate_policy
 
     frame_table_pattern = None
     frame_table_load = None
@@ -768,6 +875,7 @@ def _analyze_refcnt_dependents(image: MachOImage, function: int) -> dict:
         "vm_last_phys": load_target(2),
         "libsptm_frame_type_params": frame_type_params,
         "frame_type_descriptor_size": descriptor_size,
+        "frame_type_policy": frame_type_policy,
         "frame_type_load": (
             frame_type_load.address if frame_type_load is not None else None
         ),
@@ -897,16 +1005,33 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
         sptm["papt_compressed_tables"].get("n_papt_ranges_compressed")
         and sptm["papt_compressed_tables"].get("papt_ranges_compressed")
     )
+    frame_type_policy = (
+        kernel["refcnt_dependents"].get("frame_type_policy", {})
+        if kernel
+        else {}
+    )
+    frame_type_policy_ok = bool(
+        (
+            frame_type_policy.get("kind") == "descriptor_table"
+            and frame_type_policy.get("table")
+            and frame_type_policy.get("descriptor_size")
+            and frame_type_policy.get("policy_byte_offset") is not None
+        )
+        or (
+            frame_type_policy.get("kind") == "immediate_bitmask"
+            and frame_type_policy.get("mask_tests")
+        )
+    )
     kernel_static_ok = bool(
         kernel
         and kernel["sptm_get_page_table_refcnt"].get("function")
         and kernel["refcnt_dependents"].get("libsptm_frame_table")
-        and kernel["refcnt_dependents"].get("libsptm_frame_type_params")
+        and frame_type_policy_ok
         and kernel["libsptm_init"].get("function")
         and kernel["sptm_args"].get("target")
     )
     lines = [
-        "# iOS 26 SPTM/TXM static compatibility report",
+        "# SPTM/TXM static compatibility report",
         "",
         "This report is diagnostic-only. Addresses are unslid virtual addresses",
         "from the extracted firmware images.",
@@ -1074,6 +1199,7 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
 
         dependents = kernel["refcnt_dependents"]
         if dependents:
+            policy = dependents.get("frame_type_policy", {})
             lines.extend(
                 (
                     "",
@@ -1091,8 +1217,35 @@ def render_markdown(txm: dict, sptm: dict, kernel: dict | None) -> str:
                     ),
                     "- `sptm_frame_type_descriptor.struct_size`: "
                     + str(dependents.get("frame_type_descriptor_size") or "not resolved"),
+                    "- `frame_type_policy.kind`: "
+                    + str(policy.get("kind", "unresolved")),
                 )
             )
+            if policy.get("kind") == "descriptor_table":
+                lines.extend(
+                    (
+                        "- `frame_type_policy.table`: "
+                        + _format_address(policy.get("table")),
+                        "- `frame_type_policy.descriptor_size`: "
+                        + str(policy.get("descriptor_size")),
+                        "- `frame_type_policy.policy_byte_offset`: "
+                        + str(policy.get("policy_byte_offset")),
+                    )
+                )
+            elif policy.get("kind") == "immediate_bitmask":
+                masks = ", ".join(
+                    f"`0x{entry['mask']:08x}`"
+                    for entry in policy.get("mask_tests", [])
+                )
+                lines.extend(
+                    (
+                        "- `frame_type_policy.frame_type_source_offset`: "
+                        + str(policy.get("frame_type_source_offset")),
+                        "- `frame_type_policy.max_frame_type`: "
+                        + str(policy.get("max_frame_type")),
+                        "- `frame_type_policy.masks`: " + (masks or "none"),
+                    )
+                )
             _append_window(lines, dependents.get("window", []))
 
         wfe = kernel["wfe_timeout_configure"]

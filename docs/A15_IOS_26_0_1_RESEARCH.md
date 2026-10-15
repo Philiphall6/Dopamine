@@ -515,6 +515,13 @@ unmodified script as build 23A355. Provenance, hashes, commands, and results are
 recorded in `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`; the consolidated delta
 is in `docs/SPTM_IOS17_IOS26_STATIC_COMPARISON.md`.
 
+The follow-up normalized analyzer keeps the original reports intact and writes
+new `-v2` artifacts. It resolves the direct `ADR` chains in 21B91 TXM and tags
+frame-type policy as `immediate_bitmask` on 21B91 or `descriptor_table` on
+23A355. TXM, the SPTM image, and kernel integration now report static `PASS` on
+both builds. This removes two analyzer limitations but does not change the live
+chain: no protected request was generated or transmitted.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It

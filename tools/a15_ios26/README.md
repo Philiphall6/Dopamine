@@ -67,6 +67,8 @@ The current validation sample is an iPhone14,2 (A15) running iOS 26.0.1 build
 - SPTM compressed PAPT range count and table
 - kernel-side SPTM argument pointer and page-table refcount helper
 - `vm_first_phys`, `vm_last_phys`, frame table, and frame-type parameters
+- frame-type policy representation as either `immediate_bitmask` or
+  `descriptor_table`
 - `libsptm_init` and its PAPT range globals
 
 These results show patchfinder compatibility for the inspected paths. They do
