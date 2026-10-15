@@ -491,7 +491,22 @@ The phase 4-backed response trace v2 is recorded as JSON with SHA-256
 `431954B2507F5F0E633D6B6A9607C523EB29B5869C90B2F36281C2317A71D235`
 and Markdown with SHA-256
 `DEC0B82C5E536B7F0F0CF6329A411C5B9F0878AE6ED181E38F369A28D8284E6E`.
-The phase 5 on-device result remains pending.
+
+The phase 5 diagnostic completed on the USB-connected target on 2026-10-15.
+Its 21 checkpoints were pulled as
+`a15-ios26-diagnostic-v5-device-20261015.json`, with SHA-256
+`D2FAF47166C6AA8A190A5449B00512CBC8A0BC584FF985CF72457B3850D7B5DF`.
+The standard IOSurface result is `PASS`: width `16`, height `16`, bytes per row
+`64`, allocation size `1,024`, lock status `0`, unlock status `0`, both seed
+values `0`, and `released=true`. The exact lock mode is read-only plus
+avoid-sync. Base-address access, Mach-port creation, prefetching, memory-region
+selection, IOKit calls, and memory writes all remain false.
+
+Rebuilding response trace v2 from the phase 5 report produces the same JSON
+and Markdown hashes listed above because the boundary states are unchanged:
+the first metadata blocker remains `selector.ppl_metadata`, the first runtime
+blocker remains `kernel.runtime_read_write`, and the protected-component
+boundary remains `NOT_REACHED`.
 
 ## Remaining Hypotheses
 
