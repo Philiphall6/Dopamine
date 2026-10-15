@@ -12,29 +12,30 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_DECODE_SOURCE_READY`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_DECODE_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 ## Latest Build Evidence
 
-- Source commit: `b66873ef092462a6250ff3a33bd4184515fdf26c`
-- GitHub Actions run: `38756624466` (`PASS`, 12m 56s)
-- IPA: `Dopamine-A15-iOS26-ipc-layout-b66873e.ipa`
-- Size: `55,472,936` bytes
-- SHA-256: `FBFE8FC027BF243C5D5AE1FDD76A7CF13AFA7E891BF6F32191A07F99B89EF08B`
+- Source commit: `ac8b14d48341ef7aa14c0d1e0381c524d89168d4`
+- GitHub Actions run: `38760077616` (`PASS`, 12m 30s)
+- IPA: `Dopamine-A15-iOS26-ipc-census-decode-ac8b14d.ipa`
+- Size: `55,472,827` bytes
+- SHA-256: `EF2D674B030DA9463B0D97AFE7A25DC7247201E938DACB37FEAC4958E0816BF1`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` and
   `Frameworks/ClearSword.framework/ClearSword` are present.
 
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
-packaged Titan binary contains all nine exact-read checkpoints for the map and
-descriptor fields, the bounded process-name discovery, the IPC census markers,
-and the new `titan.ipc-layout START`, `WORD`, and read-only `STOP` markers. It
-also contains the raw table-word marker and the explicit
-`task_copy_ipc_entry not reached` stop marker. The `8beefad` device run isolated
-the `ipc_space` layout failure; `b66873e` packages the bounded symmetric
-task/IPC-space word probe needed to distinguish an offset change from an SMR
-decoding change.
+packaged Titan binary contains all nine exact-read map/descriptor checkpoints,
+the bounded process-name discovery, the symmetric IPC-layout markers, and the
+corrected IPC census `START`, `TYPE`, `CANDIDATE`, `SUMMARY`, and `STOP`
+markers. Its `START` record includes allocation size, complete-entry count,
+entry size, and unused tail. The binary also contains the explicit
+`task_copy_ipc_entry not reached` stop marker. Source inspection and the
+integration checker confirm that both the operational decoder and fallback
+logger remove the pointer signature before applying the existing SMR allocation
+decoder.
 
 ## First Active Device Result
 
