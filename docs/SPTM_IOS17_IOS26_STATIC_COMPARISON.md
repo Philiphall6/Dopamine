@@ -2,48 +2,48 @@
 
 ## Scope
 
-This is a static, provenance-aware comparison. The iOS 17 side combines a
-published iOS 17.1.1 control-flow reconstruction from a different hardware
-class with earlier A15/t8110 SPTM notes. The iOS 26 side is based on locally
-extracted iPhone14,2/A15 iOS 26.0.1 build 23A355 images and the repository's
-offline analyzers. It is not a direct same-device binary diff and does not
-invoke SPTM, TXM, a GPU command queue, or any protected-memory operation.
+This is a static, provenance-aware, same-device comparison. Both sides use
+iPhone14,2/A15 images analyzed by the same unmodified offline analyzer. The
+iOS 17.1.1 build 21B91 triplet was extracted directly from the Apple-hosted
+IPSW with HTTP range requests; the iOS 26.0.1 build 23A355 triplet is the
+previously extracted local sample. The comparison does not invoke SPTM, TXM, a
+GPU command queue, or any protected-memory operation.
 
 ## Samples
 
-| Property | iOS 17.1.1 reference | iOS 26.0.1 local sample |
+| Property | iOS 17.1.1 local sample | iOS 26.0.1 local sample |
 |---|---|---|
-| Evidence type | Published static reverse engineering | Local static binary analysis |
-| Target | Different hardware class; the reference's `t8122` label is uncertain | iPhone14,2 / A15 / t8110 |
+| Evidence type | Local static binary analysis | Local static binary analysis |
+| Target | iPhone14,2 / A15 / t8110 | iPhone14,2 / A15 / t8110 |
 | Build | 21B91 | 23A355 |
-| SPTM image | Separate Mach-O image | `sptm.bin`, 1,048,608 bytes |
-| TXM image | Separate Mach-O image | `txm.bin`, 458,784 bytes |
-| SPTM SHA-256 | Not provided by the reference | `ED7781D2D82FE4818B85DD18C6B07DC172440EEECC2F7B33FC1E048313583F7C` |
-| TXM SHA-256 | Not provided by the reference | `04CBCCBB1D986B2492C6430DA259C12579B58DE74795208202988739CB68A55E` |
+| Kernel SHA-256 | `34279BEABB02A3E7012E5430D6A3DA2775ACD5794426BB751717CC60165D453A` | Recorded in the local 23A355 extraction manifest |
+| SPTM image | `sptm.t8110.release.bin`, 721,064 bytes | `sptm.bin`, 1,048,608 bytes |
+| TXM image | `txm.iphoneos.release.bin`, 360,608 bytes | `txm.bin`, 458,784 bytes |
+| SPTM SHA-256 | `775CECC5CBF6DCD1B4B62DEC709FD20DBE8660BCFA5AB0BC67613D9FFFDBD7AA` | `ED7781D2D82FE4818B85DD18C6B07DC172440EEECC2F7B33FC1E048313583F7C` |
+| TXM SHA-256 | `D5C308F637C0FDB62C6776DCCF60C3AA9152F057ADD4D63049C01D08C953C87B` | `04CBCCBB1D986B2492C6430DA259C12579B58DE74795208202988739CB68A55E` |
 
-The local image bases are unslid analysis values, not reusable runtime
-addresses: SPTM `0xfffffff027004000` and TXM `0xfffffff017004000`.
+Both extracted image pairs use the same unslid analysis bases, not reusable
+runtime addresses: SPTM `0xfffffff027004000` and TXM
+`0xfffffff017004000`.
 
-The NewOSXBook page describes an iPhone 15 Pro Max IPSW while also displaying
-the `t8122` label. That combination conflicts with the usual SoC mapping and is
-treated here as uncertain provenance, not as an A15 sample. The Proteas notes
-do analyze `sptm.t8110`, but they cover an early iOS 17 image rather than the
-exact 17.1.1 build. Consequently, neither source provides the missing
-same-device iPhone14,2/iOS 17.1.1 binary baseline.
+The published NewOSXBook and Proteas notes remain architectural context only.
+The binary comparison no longer depends on their hardware labels: its 21B91
+provenance is the Apple IPSW `BuildManifest.plist`, which identifies `d63ap`,
+`ApChipID 0x8110`, and the exact kernel, SPTM, and TXM archive entries.
 
 ## Architectural Comparison
 
-| Area | iOS 17.1.1 reference | iOS 26.0.1 observation | Assessment |
+| Area | iOS 17.1.1 observation | iOS 26.0.1 observation | Assessment |
 |---|---|---|---|
-| Component split | SPTM and TXM are standalone firmware images | Separate SPTM and TXM images extracted | Confirmed continuity |
+| Component split | Separate SPTM and TXM images extracted | Separate SPTM and TXM images extracted | Confirmed continuity |
 | XNU entry | XNU enters SPTM with `GENTER #0` | Exact entry sequence not yet independently matched | Open static check |
 | TXM entry | TXM enters SPTM with `SVC #0` | Exact entry sequence not yet independently matched | Open static check |
 | Dispatch | SPTM routes subsystem IDs through dispatch tables; TXM is subsystem 1 | Dispatch-related behavior is consistent with the retained component split, but the iOS 26 dispatch table has not been mapped by the current analyzer | Do not assume selector identity |
-| Page ownership | SPTM assigns frame types and controls page-table transitions | PAPT range registration, lookup, compression, retyping, permission updates, and frame-type checks resolve in the iOS 26 SPTM image | Strong static continuity |
-| Kernel integration | XNU contains SPTM call stubs and protected page-table integration | `libsptm_init`, `sptm_args`, page-table refcount helper, and ten dependent references resolve | Strong static continuity |
-| TXM role | TXM handles code-signing, entitlements, trust decisions, and IMG4 services | Device-tree trust-cache range, trust-cache root, developer-mode storage, and `research.com.apple.license-to-operate` relationships resolve | Strong static continuity |
-| Runtime request | Published article reconstructs control flow offline | No request generated or transmitted by this project | `NOT_REACHED` |
-| Runtime response | No result from this target | No handler dispatch or response received | `NOT_REACHED` |
+| Page ownership | PAPT range management resolves; frame types use immediate bit masks | PAPT range management resolves; frame types use a global descriptor table with `0x60`-byte records | Confirmed continuity with a changed representation |
+| Kernel integration | `sptm_get_page_table_refcnt`, `libsptm_init`, PAPT globals, and `SPTMArgs` resolve; descriptor-table fields are absent | `libsptm_init`, `sptm_args`, page-table refcount helper, and descriptor-table relationships resolve | Same roles, different frame-type policy model |
+| TXM role | Trust-cache and developer-mode candidates are found, but direct `ADR` chains prevent final address resolution | Trust-cache root, developer-mode storage, and license relationships resolve | Architectural continuity; analyzer coverage differs |
+| Runtime request | No request generated or transmitted by this project | No request generated or transmitted by this project | `NOT_REACHED` |
+| Runtime response | No handler dispatch or response received | No handler dispatch or response received | `NOT_REACHED` |
 
 ## iOS 26-Specific Static Evidence
 
@@ -62,11 +62,17 @@ reference-count helper used by the current Dopamine static analysis.
 
 ## Result
 
-The high-level division of responsibility appears continuous from iOS 17.1.1
-to iOS 26.0.1: SPTM owns protected translation and frame-type policy, while TXM
-owns code-signing and trust decisions. The most detailed local iOS 26 evidence
-is in PAPT range management and validation, but a quantitative function-level
-delta requires an iOS 17 binary sample analyzed by the same tool.
+The high-level division of responsibility is continuous from iOS 17.1.1 to
+iOS 26.0.1: SPTM owns protected translation and frame-type policy, while TXM
+owns code-signing and trust decisions. The same analyzer reports SPTM `PASS`
+for both builds, TXM `INCOMPLETE` on 21B91 versus `PASS` on 23A355, and kernel
+integration `INCOMPLETE` on 21B91 versus `PASS` on 23A355.
+
+The incomplete 21B91 results have bounded static explanations. Its TXM uses
+direct `ADR` chains not handled by the current resolver, and its refcount helper
+tests frame types with immediate bit masks rather than the iOS 26 global
+descriptor table. These are analyzer and representation differences, not
+evidence of a protected-component rejection.
 
 The current chain still stops before protected execution. The first metadata
 blocker is `selector.ppl_metadata`; the first runtime blocker is
@@ -107,18 +113,18 @@ requires macOS tooling according to the project's setup instructions. The
 published DeviceTree fixup also removes the SGX node and avoids the related
 IOMMU initialization, so this path cannot validate the AGX/Titan chain.
 
-## Symmetric Next Comparison
+## Symmetric Baseline Obtained
 
-The next evidence-producing step is to acquire the exact iPhone14,2/iOS 17.1.1
-triplet `kernelcache + sptm.t8110 + txm` and run the same extractors and
-relationship checks used for build 23A355. `libgrabkernel2` can support
-reproducible IM4P acquisition; XPF and ChOma are suitable candidates for
-applying identical Mach-O and relationship rules to both generations.
+The exact iPhone14,2/iOS 17.1.1 triplet `kernelcache + sptm.t8110 + txm` is now
+stored under `outputs/iphone-system/ios17_1_1-symmetric`. Its extraction
+provenance, BuildManifest identities, hashes, reproducible Windows commands,
+and full analyzer result are recorded in
+`docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`.
 
-Until that symmetric sample exists, the strongest supported conclusion is
-architectural continuity, not selector, ABI, or function identity. The
-`asdfugil` introduction map is useful for checking SoC/version consistency,
-but it does not document SPTM/TXM selectors or runtime behavior.
+The next justified analyzer work is to add bounded `ADR` resolution and model
+frame-type policy as either `immediate_bitmask` or `descriptor_table`. Raw and
+normalized reports must remain separate. Even after that normalization, static
+similarity cannot establish selector, ABI, or runtime-response identity.
 
 ## Sources
 
@@ -131,5 +137,7 @@ but it does not document SPTM/TXM selectors or runtime behavior.
 - https://github.com/jprx/qemu-sptm
 - https://github.com/jprx/darwin-vm
 - https://gist.github.com/asdfugil/101ae32734938cf2c186ff330fba1e97
+- `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`
+- `outputs/iphone-system/ios17_1_1-symmetric/sptm-txm-static-report.json`
 - `outputs/iphone-system/sptm-txm-static-report.json`
 - `outputs/iphone-system/response-trace-v2.json`

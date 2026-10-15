@@ -508,6 +508,13 @@ the first metadata blocker remains `selector.ppl_metadata`, the first runtime
 blocker remains `kernel.runtime_read_write`, and the protected-component
 boundary remains `NOT_REACHED`.
 
+The previously missing symmetric iOS 17 baseline is now available. The exact
+iPhone14,2/A15 iOS 17.1.1 build 21B91 kernelcache, SPTM, and TXM were extracted
+from the Apple-hosted IPSW with HTTP range requests and analyzed with the same
+unmodified script as build 23A355. Provenance, hashes, commands, and results are
+recorded in `docs/A15_IOS17_1_1_SYMMETRIC_BASELINE.md`; the consolidated delta
+is in `docs/SPTM_IOS17_IOS26_STATIC_COMPARISON.md`.
+
 ## Phase 6 Jailbreak Selection Dry Run
 
 Phase 6 adds an ordered dry-run trace of the application jailbreak path. It
