@@ -421,6 +421,44 @@ def main() -> int:
         "revision=ipc-census-v5" in jailbreaker,
         "active probe entry does not identify the IPC census v5 build",
     )
+    for marker in (
+        "hypervisor-preflight-v1",
+        "static void A15RunHypervisorPreflight(void)",
+        'dlsym(hypervisorHandle, "hv_vm_create")',
+        'dlsym(hypervisorHandle, "hv_vm_map")',
+        'dlsym(hypervisorHandle, "hv_vcpu_create")',
+        'dlsym(hypervisorHandle, "hv_vcpu_run")',
+        'CFSTR("com.apple.private.hypervisor")',
+        'CFSTR("com.apple.private.hypervisor.vmapple")',
+        'CFSTR("com.apple.security.hypervisor")',
+        'A15ReadOnlySysctlValue("kern.hv_support")',
+        'A15ReadOnlySysctlValue("kern.hv_vmm_present")',
+        'A15ReadOnlySysctlValue("kern.hv_disable")',
+        'A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"STOP", @"read-only; no hv_* function invoked")',
+    ):
+        require(marker in jailbreaker, f"Hypervisor preflight is missing marker: {marker}")
+    preflight_start = jailbreaker.find("static void A15RunHypervisorPreflight(void)")
+    preflight_end = jailbreaker.find("- (NSError *)gatherSystemInformation", preflight_start)
+    require(
+        preflight_start >= 0 and preflight_end > preflight_start,
+        "bounded Hypervisor preflight body is missing",
+    )
+    preflight_body = jailbreaker[preflight_start:preflight_end]
+    for forbidden in (
+        "hvVmCreate(",
+        "hvVmMap(",
+        "hvVcpuCreate(",
+        "hvVcpuRun(",
+        "kwrite",
+        "task_copy_ipc_entry",
+        "IOConnectCall",
+    ):
+        require(forbidden not in preflight_body, f"read-only Hypervisor preflight contains {forbidden}")
+    require(
+        active_body.find("A15RunHypervisorPreflight();")
+        < active_body.find('A15ActiveProbeCheckpoint(@"xpf.gather"'),
+        "Hypervisor preflight no longer runs before kernel/SPTM gathering",
+    )
     require(
         "INFO: iOS 26 IOMemoryMap primary candidate" in kernel_patchfinder
         and "trying the accessor pattern" in kernel_patchfinder,

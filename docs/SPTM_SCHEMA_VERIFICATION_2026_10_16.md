@@ -115,5 +115,34 @@ The verified frontier remains unchanged:
 6. UAT-backed physical write, SPTM/TXM mutation, injection, and bootstrap:
    unreached.
 
-The Hypervisor branch is retained as a negative, well-bounded research branch;
-it is not merged into the active elevation route.
+## Adapted Accessible Branch
+
+The active diagnostic now contains a separate `hypervisor-preflight-v1`
+branch before kernel/SPTM gathering. This is an adaptation of the public
+Stage-2 research into an exact-device reachability test, rather than an
+assumption that Stage-2 must connect directly to Titan.
+
+The branch performs only these operations:
+
+1. Load `Hypervisor.framework` and resolve `hv_vm_create`, `hv_vm_map`,
+   `hv_vcpu_create`, and `hv_vcpu_run` without invoking them.
+2. Query the current process for the three published Hypervisor entitlement
+   names through `SecTaskCopyValueForEntitlement`.
+3. Read `kern.hv_support`, `kern.hv_vmm_present`, and `kern.hv_disable` with
+   read-only `sysctlbyname` calls.
+4. Emit a persistent `hypervisor.preflight STOP` checkpoint before XPF,
+   ClearSword, Titan, or any `hv_*` operation.
+
+The resulting device log separates four possible frontiers:
+
+| Observation | First confirmed boundary |
+|---|---|
+| Framework or symbols missing | User-space Hypervisor ABI is not exposed to this image/process |
+| Symbols present, entitlements absent | The accessible route reaches the entitlement gate |
+| Entitlement visible, HV sysctls disabled or absent | The route reaches a kernel/bootstrap availability gate |
+| Symbols, entitlement, and support visible | Normal Hypervisor entry is reachable; Stage-2 typing and VMID contracts remain next |
+
+This preflight does not claim that the final case exists, and it deliberately
+does not test `hv_vm_create`. It gives the Stage-2 branch a measurable first
+edge while preserving the active probe's no-VM, no-right-transfer, and
+no-protected-write boundary.

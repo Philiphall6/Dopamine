@@ -32,8 +32,10 @@
 #import <libjailbreak/kcall_arm64.h>
 #import <libjailbreak/basebin_gen.h>
 #import <CoreServices/LSApplicationProxy.h>
+#import <sys/sysctl.h>
 #import <sys/utsname.h>
 #import <fcntl.h>
+#import <errno.h>
 #import "spawn.h"
 #import "clock_alarm.h"
 #import <IOSurface/IOSurfaceRef.h>
@@ -91,6 +93,92 @@ static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString
 
     NSString *line = [NSString stringWithFormat:@"[A15ACTIVE] %@ %@ %@", stage, status, detail ?: @""];
     [[DOUIManager sharedInstance] sendLog:line debug:NO];
+}
+
+typedef CFTypeRef (*A15SecTaskCreateFromSelfFn)(CFAllocatorRef allocator);
+typedef CFTypeRef (*A15SecTaskCopyValueForEntitlementFn)(CFTypeRef task, CFStringRef entitlement, CFErrorRef *error);
+
+static NSString *A15ReadOnlySysctlValue(const char *name)
+{
+    size_t size = 0;
+    errno = 0;
+    if (sysctlbyname(name, NULL, &size, NULL, 0) != 0) {
+        return [NSString stringWithFormat:@"%s=unavailable(errno=%d)", name, errno];
+    }
+    if (size == 0 || size > sizeof(uint64_t)) {
+        return [NSString stringWithFormat:@"%s=unsupported-size(%zu)", name, size];
+    }
+
+    uint64_t value = 0;
+    size_t readSize = size;
+    errno = 0;
+    if (sysctlbyname(name, &value, &readSize, NULL, 0) != 0) {
+        return [NSString stringWithFormat:@"%s=unreadable(errno=%d,size=%zu)", name, errno, size];
+    }
+    return [NSString stringWithFormat:@"%s=0x%llx(size=%zu)", name, value, readSize];
+}
+
+static BOOL A15EntitlementValueEnabled(CFTypeRef value)
+{
+    if (!value) return NO;
+    if (CFGetTypeID(value) == CFBooleanGetTypeID()) {
+        return CFBooleanGetValue((CFBooleanRef)value);
+    }
+    return YES;
+}
+
+static void A15RunHypervisorPreflight(void)
+{
+    A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"START", @"read-only userland surface discovery");
+
+    void *hypervisorHandle = dlopen("/System/Library/Frameworks/Hypervisor.framework/Hypervisor", RTLD_LAZY | RTLD_LOCAL);
+    BOOL hvVmCreate = hypervisorHandle && dlsym(hypervisorHandle, "hv_vm_create");
+    BOOL hvVmMap = hypervisorHandle && dlsym(hypervisorHandle, "hv_vm_map");
+    BOOL hvVcpuCreate = hypervisorHandle && dlsym(hypervisorHandle, "hv_vcpu_create");
+    BOOL hvVcpuRun = hypervisorHandle && dlsym(hypervisorHandle, "hv_vcpu_run");
+    NSString *frameworkDetail = [NSString stringWithFormat:
+        @"framework=%@ hv_vm_create=%@ hv_vm_map=%@ hv_vcpu_create=%@ hv_vcpu_run=%@",
+        hypervisorHandle ? @"present" : @"missing",
+        hvVmCreate ? @"present" : @"missing",
+        hvVmMap ? @"present" : @"missing",
+        hvVcpuCreate ? @"present" : @"missing",
+        hvVcpuRun ? @"present" : @"missing"];
+    A15ActiveProbeCheckpoint(@"hypervisor.framework", hypervisorHandle ? @"PASS" : @"BLOCKED", frameworkDetail);
+
+    void *securityHandle = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY | RTLD_LOCAL);
+    A15SecTaskCreateFromSelfFn createTask = securityHandle ? dlsym(securityHandle, "SecTaskCreateFromSelf") : NULL;
+    A15SecTaskCopyValueForEntitlementFn copyEntitlement = securityHandle ? dlsym(securityHandle, "SecTaskCopyValueForEntitlement") : NULL;
+    CFTypeRef task = createTask ? createTask(kCFAllocatorDefault) : NULL;
+    CFTypeRef privateValue = task && copyEntitlement ? copyEntitlement(task, CFSTR("com.apple.private.hypervisor"), NULL) : NULL;
+    CFTypeRef vmAppleValue = task && copyEntitlement ? copyEntitlement(task, CFSTR("com.apple.private.hypervisor.vmapple"), NULL) : NULL;
+    CFTypeRef securityValue = task && copyEntitlement ? copyEntitlement(task, CFSTR("com.apple.security.hypervisor"), NULL) : NULL;
+    BOOL privateEnabled = A15EntitlementValueEnabled(privateValue);
+    BOOL vmAppleEnabled = A15EntitlementValueEnabled(vmAppleValue);
+    BOOL securityEnabled = A15EntitlementValueEnabled(securityValue);
+    NSString *entitlementDetail = [NSString stringWithFormat:
+        @"query-api=%@ private=%@ vmapple=%@ security=%@",
+        task && copyEntitlement ? @"present" : @"unavailable",
+        privateEnabled ? @"present" : @"absent",
+        vmAppleEnabled ? @"present" : @"absent",
+        securityEnabled ? @"present" : @"absent"];
+    A15ActiveProbeCheckpoint(@"hypervisor.entitlement",
+        (privateEnabled || vmAppleEnabled || securityEnabled) ? @"PASS" : @"BLOCKED",
+        entitlementDetail);
+
+    NSString *sysctlDetail = [NSString stringWithFormat:@"%@ %@ %@",
+        A15ReadOnlySysctlValue("kern.hv_support"),
+        A15ReadOnlySysctlValue("kern.hv_vmm_present"),
+        A15ReadOnlySysctlValue("kern.hv_disable")];
+    A15ActiveProbeCheckpoint(@"hypervisor.sysctl", @"INFO", sysctlDetail);
+
+    if (privateValue) CFRelease(privateValue);
+    if (vmAppleValue) CFRelease(vmAppleValue);
+    if (securityValue) CFRelease(securityValue);
+    if (task) CFRelease(task);
+    if (securityHandle) dlclose(securityHandle);
+    if (hypervisorHandle) dlclose(hypervisorHandle);
+
+    A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"STOP", @"read-only; no hv_* function invoked");
 }
 
 - (NSError *)gatherSystemInformation
@@ -267,7 +355,9 @@ static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString
 
     NSString *runID = NSUUID.UUID.UUIDString;
     setenv("A15_ACTIVE_PROBE_RUN_ID", runID.UTF8String, 1);
-    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=ipc-census-v5");
+    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=ipc-census-v5+hypervisor-preflight-v1");
+
+    A15RunHypervisorPreflight();
 
     A15ActiveProbeCheckpoint(@"xpf.gather", @"START", @"");
     NSError *error = [self gatherSystemInformation];

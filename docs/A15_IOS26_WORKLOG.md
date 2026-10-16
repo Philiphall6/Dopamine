@@ -596,6 +596,16 @@ identical to the prior producer report. This confirms that the public
 missing AGX/UAT authorization edge: frame types `0x1f/0x20` retain zero direct
 UAT-domain permission on the exact A15/23A355 sample.
 
+The public Stage-2 result has nevertheless been adapted into a new measurable
+branch instead of being treated only as a negative result. The exact-target
+probe now runs `hypervisor-preflight-v1` before XPF. It checks the user-space
+Hypervisor framework and four entry-point symbols, introspects the three
+Hypervisor entitlement names on the current process, and reads the three HV
+sysctls. It then records an explicit read-only stop without invoking any
+`hv_*` function. The first device run will therefore locate this alternate
+route's real boundary at framework visibility, entitlement, or kernel support
+without changing Titan's IPC and protected-write boundaries.
+
 ### Verification
 
 - `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests
