@@ -487,7 +487,12 @@ scan. The exact-target census now snapshots the complete entry before and
 after following it, requires capability rights and an in-space object state,
 and keeps the `IOMachPort` plus user-client vtables as the final attribution
 checks. This revision remains read-only and still stops before IPC right copy
-or GFX submission; build and device confirmation are pending.
+or GFX submission. GitHub Actions run `38871258849` built source commit
+`30579d2c1b3cb32b2697be95fea188e91ed3806a` successfully, and package
+inspection confirmed the v3 markers plus the explicit pre-copy stop. The
+resulting `Dopamine-A15-iOS26-ipc-census-v3-30579d2.ipa` has SHA-256
+`74EBB99892BDD649957748B64A31B05E07E07025686F3B2B3C6A57D5491C122B`;
+device confirmation is pending.
 
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
