@@ -49,12 +49,19 @@ and after following an object. The iOS 26 patchfinder still reports the
 rejected primary `IOMemoryMap::fAddress` match as an expected accessor-pattern
 retry, rather than as a false error.
 
-This guard build was not installed on the device because it does not advance
-the active probe. It preserves the exact v5 read-only stop and adds a second
-defense that rejects iOS 26 or XNU 12377 before the first legacy target-port
-read or any write. The public Calif/Hexacon iOS 27 demonstration is tracked
-separately in `docs/CALIF_HEXACON_IOS27_SIGNAL.md`; no public technical detail
-currently connects it to Titan, backboardd IPC transfer, or this A15 route.
+This guard build was installed and run on the exact target on 2026-10-16 even
+though it does not advance the active probe. It preserves the exact v5
+read-only stop and adds a second defense that rejects iOS 26 or XNU 12377
+before the first legacy target-port read or any write. The rerun decoded a
+`0x10000`-byte backboardd IPC allocation containing 2,730 entries plus a
+`0x10`-byte tail. It again found complete profiles at indices `537` and `1009`,
+reported 1,940 rights, zero unstable snapshots, 86 type-36 connections, two
+exact matches, and stable final table/PID checks. The probe stopped before
+`task_copy_ipc_entry`; the guard itself was therefore not reached and no right
+transfer or write occurred. The public Calif/Hexacon iOS 27 demonstration is
+tracked separately in `docs/CALIF_HEXACON_IOS27_SIGNAL.md`; no public technical
+detail currently connects it to Titan, backboardd IPC transfer, or this A15
+route.
 
 ## First Active Device Result
 

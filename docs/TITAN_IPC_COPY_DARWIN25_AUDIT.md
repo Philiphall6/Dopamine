@@ -133,6 +133,9 @@ The packaged `Titan.framework/Titan` contains both the existing
 The resulting IPA is
 `Dopamine-A15-iOS26-ipc-profile-v5-guard-79b75bb.ipa`, 55,474,629 bytes,
 SHA-256 `9A423151A27EBAFC2C3C4E4F0942886B95FC51928E592501F80EE01F60F8F752`.
-It was not installed because the change is a source-level safety barrier, not
-a new device probe.
+It was installed and run on the exact target on 2026-10-16. The existing v5
+read-only census completed with stable table/PID checks and stopped before
+`task_copy_ipc_entry`; the new refusal was therefore not reached. This confirms
+that packaging the guard did not regress the bounded probe, but it is not a
+runtime exercise of the rejected copy path.
 

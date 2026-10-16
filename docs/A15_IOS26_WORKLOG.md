@@ -553,7 +553,17 @@ pre-copy stop markers, plus the new Darwin 25 legacy-copy refusal in
 `Frameworks/Titan.framework/Titan`. The resulting
 `Dopamine-A15-iOS26-ipc-profile-v5-guard-79b75bb.ipa` is 55,474,629 bytes with
 SHA-256 `9A423151A27EBAFC2C3C4E4F0942886B95FC51928E592501F80EE01F60F8F752`.
-No device run is required for this source-only guard.
+No device run was required for this source-only guard. It was nevertheless
+installed and run on the exact target on 2026-10-16. The guarded build again
+completed ClearSword, the IORVBAR traversal, and the full read-only IPC census.
+The decoded backboardd table had allocation `0x10000`, 2,730 entries, and a
+`0x10`-byte tail. Exact IOGPU user-client matches remained at indices `537` and
+`1009`; both profiles were complete (`valid=0x7f`) and retained the same shared
+GPU but distinct device, namespace, and handles relationship. The final census
+reported 1,940 rights, zero unstable snapshots, 86 type-36 connections, two
+exact matches, and stable table/PID checks. It stopped at the explicit
+read-only boundary before `task_copy_ipc_entry`, so the Darwin 25 refusal was
+not reached and no write or right transfer occurred.
 
 A same-day Calif/Hexacon demonstration reportedly showed a private untethered
 jailbreak on iPhone 18 Pro with iOS 27.0.1. The public conference page confirms
