@@ -472,7 +472,7 @@ static void A15RunHypervisorPreflight(void)
 
     NSString *runID = NSUUID.UUID.UUIDString;
     setenv("A15_ACTIVE_PROBE_RUN_ID", runID.UTF8String, 1);
-    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=ipc-census-v5+hypervisor-preflight-v2+rtkit-mmio-disabled-v1");
+    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=self-gpu-client-v1+rtkit-mmio-disabled-v1");
 
     A15RunHypervisorPreflight();
 
