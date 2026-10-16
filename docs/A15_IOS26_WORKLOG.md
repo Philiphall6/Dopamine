@@ -572,6 +572,15 @@ or SPTM/TXM mechanism. `docs/CALIF_HEXACON_IOS27_SIGNAL.md` records the signal,
 its provenance, and the unanswered questions. It does not change the current
 A15 route.
 
+A public-source refresh on 2026-10-16 found no released iOS 26/A15 SPTM
+bypass, TXM injection path, or Darwin 25 replacement for Titan's historical
+IPC-right transfer. Apple does document two controlled alternatives: the
+Security Research Device can boot custom SPTM/TXM firmware, and the Private
+Cloud Compute Virtual Research Environment can boot a custom SPTM/TXM/kernel
+set. These are useful for validating monitor contracts without weakening the
+bounded A15 probe, but neither demonstrates a production-device bypass or
+portability to iPhone14,2 build 23A355.
+
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
 `0x70000000#` family. Its earlier iOS 17 round-two post records UAT as subsystem

@@ -1507,6 +1507,23 @@ The public sources do not provide a shortcut around this boundary:
   note explicitly reports no bypass and supplies no connection to the
   A15/23A355 GPU UAT producer.
 
+A fresh public-source check on 2026-10-16 found no released iOS 26/A15 chain,
+SPTM bypass, TXM injection mechanism, or Darwin 25 replacement for Titan's
+historical IPC-right transfer. The strongest new actionable route is an
+official research environment rather than a consumer-device shortcut:
+
+- Apple's Security Research Device program currently accepts applications
+  through 2026-10-30. Apple documents shell access, arbitrary entitlements,
+  kernel customization, and custom SPTM/TXM firmware on the specially fused
+  research device. This permits controlled monitor experiments without first
+  defeating the production-device protections.
+- Apple's Private Cloud Compute Virtual Research Environment permits custom
+  SPTM, TXM, and kernel-cache firmware. It can validate monitor request and
+  policy hypotheses, but its PCC platform is not an iPhone14,2/A15 substitute
+  and cannot establish portability to build 23A355.
+- Neither official environment is evidence of a bypass on a standard iPhone.
+  Results from either route must remain separated from the live A15 evidence.
+
 The local `23A355` A15 extraction also contains `has-virtualization=1` in the
 device tree, the SPTM guest-entry/exit strings, and named Stage-2 frame types
 `0x1f/0x20`. SPTM reads the property at `0xfffffff0270c3a74` and stores the
@@ -1563,3 +1580,5 @@ Sources reviewed:
 - https://github.com/cloverfield11/ios26-hypervisor-research
 - https://df-f.com/blog/sptm4
 - https://df-f.com/blog/ios-17round2
+- https://security.apple.com/research-device
+- https://security.apple.com/documentation/private-cloud-compute/virtualresearchenvironment
