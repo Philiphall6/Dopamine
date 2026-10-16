@@ -587,6 +587,15 @@ identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
 `7` with 13 services. This corroborates the analyzer's independent dispatch
 attribution, but neither post publishes a Stage-2 or UAT bypass.
 
+A fresh schema reproduction is recorded in
+`docs/SPTM_SCHEMA_VERIFICATION_2026_10_16.md`. The iOS 17 and iOS 26
+SPTM/TXM reports are structurally identical to v10 after normalizing only
+their input path strings; the regenerated AGX/UAT report is byte-for-byte
+identical to the prior producer report. This confirms that the public
+`ios26-hypervisor-research` route is a separate typed Stage-2 API, not the
+missing AGX/UAT authorization edge: frame types `0x1f/0x20` retain zero direct
+UAT-domain permission on the exact A15/23A355 sample.
+
 ### Verification
 
 - `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests
