@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_V4_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_V4_DEVICE_PASS`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 The durable offline-analysis handoff is
@@ -295,8 +295,16 @@ their own 16-line cap, independent of the 64-line generic-candidate cap. Each
 `MATCH` record includes the table index, entry and object header bits, port,
 wrapper, object, runtime vtable, and unslid vtable. The summary separately
 reports `match-logged` and `match-truncated`. Package inspection confirms these
-markers and the explicit pre-copy stop in the built Titan binary. Device
-confirmation of the two detailed match records is pending.
+markers and the explicit pre-copy stop in the built Titan binary.
+
+The exact target ran v4 on 2026-10-16 without rebooting. It identified the two
+expected IOGPU user-client objects at IPC indices `537` and `1009`. Their
+objects were `0xffffffdf5e176b30` and `0xffffffdf5e176ca0`; both used runtime
+vtable `0xfffffff04b36fa10` (unslid `0xfffffff007b17a10`). The complete scan
+reported 2,048 entries, 1,669 rights, zero unstable snapshots, 85 type-36
+IOKit connections, two exact matches, `match-logged=2`, and
+`match-truncated=0`. The table and PID remained stable, and execution again
+stopped before IPC right copy.
 
 ## End-to-End Chain Status
 
@@ -310,7 +318,7 @@ confirmation of the two detailed match records is pending.
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
 | Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
-| Titan unrestricted physical write | **NOT REACHED / IPC CENSUS V3 DEVICE PASS; V4 BUILT** | IORVBAR, `backboardd`, and the stable table decode passed; v3 found two exact IOGPU user-client objects, and packaged v4 exposes their indices while IPC entry copy and GFX submission remain blocked |
+| Titan unrestricted physical write | **NOT REACHED / IPC CENSUS V4 DEVICE PASS** | IORVBAR, `backboardd`, and the stable table decode passed; v4 identified exact IOGPU user-client objects at indices 537 and 1009 while IPC entry copy and GFX submission remain blocked |
 | SPTM/PAPT and Stage-2 contract | **NO SHORTCUT / TYPED STAGE-2 CONTRACT MAPPED** | Table 0 and the `0x1f/0x20` lifecycle are statically resolved, but they add protected frame, VMID, and state-transition gates and do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |

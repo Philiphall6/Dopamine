@@ -254,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_CENSUS_V4_BUILT" in report,
-        "report does not record the IPC census v4 build state",
+        "ACTIVE_TITAN_PROBE_IPC_CENSUS_V4_DEVICE_PASS" in report,
+        "report does not record the IPC census v4 device result",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
@@ -381,7 +381,13 @@ def main() -> int:
         "titan.ipc-census CANDIDATE",
         "titan.ipc-census MATCH",
         "match-logged=%zu match-truncated=%zu",
-        "titan.ipc-census DECODE revision=ipc-census-v4",
+        "struct titan_userclient_profile",
+        "titan_profile_userclient",
+        "TITAN_PROFILE_COMPLETE",
+        "titan.ipc-census PROFILE index=",
+        "titan.ipc-census PROFILE-COMPARE",
+        "profiles=%zu profile-complete=%zu",
+        "titan.ipc-census DECODE revision=ipc-census-v5",
         "titan.ipc-census OBJECT-TYPE",
         "titan.ipc-census OBJECT-STATE",
         "titan.ipc-census SUMMARY",
@@ -393,8 +399,8 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=ipc-census-v4" in jailbreaker,
-        "active probe entry does not identify the IPC census v4 build",
+        "revision=ipc-census-v5" in jailbreaker,
+        "active probe entry does not identify the IPC census v5 build",
     )
     require(
         "INFO: iOS 26 IOMemoryMap primary candidate" in kernel_patchfinder
@@ -418,6 +424,12 @@ def main() -> int:
     census_body = ipc_port[census_start:census_end]
     for forbidden in ("kwrite", "task_copy_ipc_entry", "mach_port_", "IOConnectCall"):
         require(forbidden not in census_body, f"read-only IPC census contains {forbidden}")
+    profile_start = ipc_port.find("static bool titan_profile_userclient")
+    profile_end = ipc_port.find("static const char *titan_profile_compare", profile_start)
+    require(profile_start >= 0 and profile_end > profile_start, "IPC profile body is missing")
+    profile_body = ipc_port[profile_start:profile_end]
+    for forbidden in ("kwrite", "task_copy_ipc_entry", "mach_port_", "IOConnectCall"):
+        require(forbidden not in profile_body, f"read-only IPC profile contains {forbidden}")
     require(
         "ipc_table_size % ipc_entry_size != 0" not in census_body
         and "ipc_table_count = ipc_table_size / ipc_entry_size" in census_body

@@ -508,7 +508,15 @@ confirmed `ipc-census-v4`, the exact `MATCH` records and counters, and the
 explicit pre-copy stop. The resulting
 `Dopamine-A15-iOS26-ipc-census-v4-d55d667.ipa` is 55,473,398 bytes with
 SHA-256 `1F518E8F11F3815E896B51FDCA632C98F805304C435C59BF209D27F656BB36AB`.
-Device confirmation of the detailed match records is pending.
+The exact target ran v4 on 2026-10-16 without rebooting. It emitted exact
+matches at IPC indices `537` and `1009`, with object addresses
+`0xffffffdf5e176b30` and `0xffffffdf5e176ca0`. Both resolved to runtime vtable
+`0xfffffff04b36fa10` (unslid `0xfffffff007b17a10`). The scan reported 2,048
+entries, 1,669 rights, zero unstable snapshots, 85 type-36 IOKit connections,
+two logged matches, no truncated match, and stable final table/PID checks. The
+next bounded source revision profiles only the seven read-only downstream
+fields needed to compare the two user clients; the pre-copy stop remains in
+place.
 
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
