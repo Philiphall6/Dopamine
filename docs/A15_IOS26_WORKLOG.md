@@ -447,6 +447,37 @@ STATE_SPTM_CALLED_BY_XNU`. Both entries use the same state-transition handler
 at `0xfffffff02708c23c`. This bounds the guest route without identifying an
 UAT permission edge or a bypass.
 
+The v9 report continues from those transitions into the SPTM endpoint registry
+and typed-page lifecycle. The static registry slot at `0xfffffff0270856e8`
+selects table `0` at `0xfffffff02701c910`; `sptm_dispatch` bounds it to 50
+endpoints. The guest subset is `0x18` (`sptm_guest_va_to_ipa`), `0x19`
+(`sptm_guest_stage1_tlb_op`), `0x1a` (inferred Stage-2 TLB operation from its
+root acquisition and `sptm_broadcast_tlbi` call), `0x1b`
+(`sptm_guest_dispatch`), and `0x1c` (`sptm_guest_exit`). `sptm_guest_enter`
+has no endpoint slot and is called only internally.
+
+The same extraction proves that a guest root is not a caller-supplied arbitrary
+page. `acquire_stage2_root_pt` requires `0x4000` alignment, the tracked SPTM
+physical range, a valid in-flight reference, and exact frame type `0x1f`.
+Endpoint `1` is `sptm_retype`; its root callback validates the geometry,
+requires the virtualization gate for attribute index `1`, checks the encoded
+VMID with `(vmid & 0xff01) == 1`, and atomically rejects duplicate VMIDs. Root
+retype-out requires zero mapping references, executes `TLBI VMALLS12E1IS`,
+and clears the VMID bitmap. Type `0x20` accepts only page-table subtype values
+below `4`, and retype-out requires both mapping and nested reference counts to
+be zero. This closes the easy Stage-2-shortcut hypothesis without exercising
+any protected service.
+
+Integrated with the live chain, this result defines a later contract rather
+than a replacement path. The current on-device frontier remains the bounded
+`backboardd` IPC census after ClearSword, Titan patchfinding, and IORVBAR
+resolution have passed. IPC entry copy, GFX command-buffer submission,
+unrestricted physical write, and protected-memory mutation remain unreached.
+If those stages are eventually satisfied, Stage-2 still requires the typed
+`0x1f/0x20` frame lifecycle, unique VMID ownership, and guarded GENTER state
+transitions. Nothing in the recovered table grants the missing UAT leaf
+permission or turns guest translation into a host Stage-1 write primitive.
+
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
 `0x70000000#` family. Its earlier iOS 17 round-two post records UAT as subsystem
@@ -455,7 +486,7 @@ attribution, but neither post publishes a Stage-2 or UAT bypass.
 
 ### Verification
 
-- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 46 tests
+- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests
   passed.
 - In-memory `compile()` check for `analyze_agx_uppl_producer.py`,
   `analyze_titan.py`, `analyze_sptm_txm.py`, and
@@ -477,6 +508,6 @@ attribution, but neither post publishes a Stage-2 or UAT bypass.
 | `sptm-txm-static-report-v10.md` | `80E58C6FFB4CAA83A8B427FA07F4A94B2304B2391F9BB5EF7DF42805458E4AEE` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.md` | `5D6DADB165E0B4B7AF39B77BCEBC05B41193F28478BF14673986BCCA793005D4` |
-| `agx-uppl-producer/agx-uppl-producer.json` | `30D13A4EFAD70607226FFCE771322AA3509BEFDF83DBE18E93D5D291FF3CA5A6` |
-| `agx-uppl-producer/agx-uppl-producer.md` | `4C8905BEA6C80FF210D075A2B0A998132CA40999DA387E4CC2D6DEF041F3D7F0` |
+| `agx-uppl-producer/agx-uppl-producer.json` | `D1280C523ECFEEC08564AADD4AC8CCBD7B774A1E30F02BC5DE65A1C8DFFDCB6A` |
+| `agx-uppl-producer/agx-uppl-producer.md` | `D0FEF4A3845B9D45FC01BEF825982F930E91785A87A295581B5B54CE49724BBA` |
 

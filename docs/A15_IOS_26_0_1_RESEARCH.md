@@ -253,9 +253,18 @@ remains unconditional.
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
 | Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
 | Titan unrestricted physical write | **NOT REACHED / CLEAN IPC DECODE STOP** | IORVBAR, `backboardd`, and the symmetric IPC layout passed; signed-table normalization is corrected in source before a bounded census, with IPC entry copy and GFX submission still blocked |
-| SPTM/PAPT bypass contract | **MISSING** | Static addresses do not satisfy Dopamine's physical-write bypass contract |
+| SPTM/PAPT and Stage-2 contract | **NO SHORTCUT / TYPED STAGE-2 CONTRACT MAPPED** | Table 0 and the `0x1f/0x20` lifecycle are statically resolved, but they add protected frame, VMID, and state-transition gates and do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
+
+The two research routes now join without being conflated. The active Titan
+route still stops at the bounded `backboardd` IPC census, before IPC entry
+copy, GFX command-buffer submission, unrestricted physical write, or any
+SPTM/TXM mutation. The offline Stage-2 route describes what a later guest
+operation would additionally require: retyping tracked pages as root type
+`0x1f` and page-table type `0x20`, claiming a unique VMID, and entering the
+guest state machine through the guarded GENTER path. It neither replaces the
+missing Titan stages nor authorizes an otherwise forbidden UAT leaf mapping.
 
 ClearSword/DarkSword provide the kernel read/write candidate used through iOS
 26.0.1, and the device-side selector chooses ClearSword for this exact target.
@@ -1403,6 +1412,23 @@ service `0xd` for `STATE_XNU_GUEST -> STATE_SPTM_CALLED_BY_XNU`. Both use
 handler `0xfffffff02708c23c`. These are private guest-context transitions;
 they neither change the zero UAT policy rows for `0x1f/0x20` nor supply a
 Stage-1 physical-write primitive.
+
+The v9 endpoint/lifecycle pass identifies the next boundary. SPTM dispatch
+table `0` begins at `0xfffffff02701c910`, is registered through
+`0xfffffff0270856e8`, and is bounded to 50 entries. Its guest-facing subset is
+`0x18` through `0x1c`; guest-enter itself is not exported. The `0x1a` handler
+is identified conservatively as the Stage-2 TLB operation because it acquires
+the typed guest root, validates a VA range, and calls `sptm_broadcast_tlbi`.
+
+The root lifecycle is equally restrictive. `acquire_stage2_root_pt` accepts
+only a `0x4000`-aligned, tracked frame of exact type `0x1f`. The ordinary
+`sptm_retype` endpoint creates that type, claims a nonduplicate VMID in SPTM's
+bitmap, and records the root metadata. Retype-out refuses a mapped root,
+invalidates the Stage-2 TLB with `VMALLS12E1IS`, and then releases the VMID.
+Stage-2 page-table type `0x20` stores a subtype below `4` and cannot be removed
+while either mapping or nested references remain. This evidence changes the
+research route from "call a guest service with any page" to "first satisfy a
+protected frame-type and VMID state machine"; it still supplies no bypass.
 
 Dataflow Forensics' public `SPTM - The Last Bits` post independently places UAT
 at dispatch table `7` and describes the `0x70000000#` call family. Its iOS 17

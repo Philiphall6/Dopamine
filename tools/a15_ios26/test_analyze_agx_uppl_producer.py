@@ -17,6 +17,9 @@ from analyze_agx_uppl_producer import (
     recover_legacy_register_mapping_policy,
     recover_legacy_uat_leaf_mapping_contract,
     recover_selector_type_pairs,
+    recover_stage2_page_retype_contract,
+    recover_stage2_root_acquire_contract,
+    recover_stage2_root_retype_contract,
     recover_uat_leaf_mapping_contract,
     summarize_domain_mapping_policy,
 )
@@ -186,6 +189,54 @@ class RegistrationCallTests(unittest.TestCase):
             object_instruction(0x2004, "mov", "w8, #0xe"),
         ]
         self.assertEqual(recover_genter_dispatch_routes(body), [])
+
+    def test_recovers_stage2_root_retype_contract(self) -> None:
+        body = [
+            object_instruction(0x2000, "cmp", "w1, #0x1f"),
+            object_instruction(0x2004, "cmp", "w11, #5"),
+            object_instruction(0x2008, "cmp", "w11, #1"),
+            object_instruction(0x200C, "lsr", "x8, x2, #0x10"),
+            object_instruction(0x2010, "mov", "w9, #0xff01"),
+            object_instruction(0x2014, "and", "w9, w8, w9"),
+            object_instruction(0x2018, "cmp", "w9, #1"),
+            object_instruction(0x201C, "ldset", "x10, x9, [x9]"),
+            object_instruction(0x2020, "strh", "w8, [x19, #4]"),
+            object_instruction(0x2024, "strb", "w20, [x19, #0xa]"),
+        ]
+        result = recover_stage2_root_retype_contract(body)
+        self.assertEqual(result["status"], "STAGE2_ROOT_RETYPE_CONTRACT_CONFIRMED")
+        self.assertEqual(result["frame_type"], 0x1F)
+        self.assertEqual(result["virtualization_gated_attribute_index"], 1)
+        self.assertEqual(result["vmid_field_shift"], 0x10)
+        self.assertEqual(result["vmid_validation_mask"], 0xFF01)
+        self.assertEqual(result["vmid_validation_value"], 1)
+        self.assertTrue(result["vmid_duplicate_rejected"])
+
+    def test_recovers_stage2_page_retype_contract(self) -> None:
+        result = recover_stage2_page_retype_contract(
+            [
+                object_instruction(0x3000, "cmp", "w8, #4"),
+                object_instruction(0x3004, "strb", "w2, [x0, #4]"),
+            ]
+        )
+        self.assertEqual(result["status"], "STAGE2_PAGE_RETYPE_CONTRACT_CONFIRMED")
+        self.assertEqual(result["frame_type"], 0x20)
+        self.assertEqual(result["subtype_maximum_exclusive"], 4)
+
+    def test_recovers_stage2_root_acquire_contract(self) -> None:
+        result = recover_stage2_root_acquire_contract(
+            [
+                object_instruction(0x4000, "tst", "x0, #0x3fff"),
+                object_instruction(0x4004, "subs", "x10, x0, x8"),
+                object_instruction(0x4008, "mov", "w8, #2"),
+                object_instruction(0x400C, "ldaddah", "w8, w8, [x0]"),
+                object_instruction(0x4010, "cmp", "x8, #0x1f"),
+            ]
+        )
+        self.assertEqual(result["status"], "STAGE2_ROOT_ACQUIRE_CONTRACT_CONFIRMED")
+        self.assertEqual(result["alignment"], 0x4000)
+        self.assertEqual(result["expected_frame_type"], 0x1F)
+        self.assertEqual(result["in_flight_increment"], 2)
 
     def test_recovers_producer_argument_bindings(self) -> None:
         body = [

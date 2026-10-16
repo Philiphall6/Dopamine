@@ -1069,6 +1069,163 @@ def recover_genter_dispatch_routes(instructions: Sequence) -> list[dict]:
     return routes
 
 
+def recover_stage2_root_retype_contract(instructions: Sequence) -> dict:
+    """Recover the bounded metadata contract for a Stage-2 root retype."""
+
+    root_frame_type = None
+    vmid_field_shift = None
+    vmid_validation_mask = None
+    vmid_validation_value = None
+    maximum_attribute_index = None
+    virtualization_attribute_index = None
+    vmid_claim = None
+    vmid_store = None
+    attribute_store = None
+    for index, instruction in enumerate(instructions):
+        parts = [part.strip().lower() for part in instruction.op_str.split(",")]
+        if instruction.mnemonic == "cmp" and len(parts) == 2:
+            immediate = parse_immediate_operand(parts[1])
+            if parts[0] == "w1" and immediate == 0x1F:
+                root_frame_type = immediate
+            elif parts[0] == "w11" and immediate == 5:
+                maximum_attribute_index = immediate
+            elif parts[0] == "w11" and immediate == 1:
+                virtualization_attribute_index = immediate
+            elif parts[0] == "w9" and vmid_validation_mask is not None:
+                vmid_validation_value = immediate
+        elif (
+            instruction.mnemonic == "lsr"
+            and len(parts) == 3
+            and parts[:2] == ["x8", "x2"]
+        ):
+            vmid_field_shift = parse_immediate_operand(parts[2])
+        elif (
+            instruction.mnemonic == "mov"
+            and len(parts) == 2
+            and parts[0] == "w9"
+        ):
+            immediate = parse_immediate_operand(parts[1])
+            if immediate == 0xFF01:
+                vmid_validation_mask = immediate
+        elif instruction.mnemonic == "ldset":
+            vmid_claim = instruction.address
+        elif instruction.mnemonic == "strh" and instruction.op_str == "w8, [x19, #4]":
+            vmid_store = instruction.address
+        elif instruction.mnemonic == "strb" and instruction.op_str == "w20, [x19, #0xa]":
+            attribute_store = instruction.address
+
+    confirmed = all(
+        value is not None
+        for value in (
+            root_frame_type,
+            vmid_field_shift,
+            vmid_validation_mask,
+            vmid_validation_value,
+            maximum_attribute_index,
+            virtualization_attribute_index,
+            vmid_claim,
+            vmid_store,
+            attribute_store,
+        )
+    )
+    return {
+        "status": "STAGE2_ROOT_RETYPE_CONTRACT_CONFIRMED" if confirmed else "PARTIAL",
+        "frame_type": root_frame_type,
+        "attribute_index_maximum": maximum_attribute_index,
+        "virtualization_gated_attribute_index": virtualization_attribute_index,
+        "vmid_field_shift": vmid_field_shift,
+        "vmid_validation_mask": vmid_validation_mask,
+        "vmid_validation_value": vmid_validation_value,
+        "vmid_claim_operation": vmid_claim,
+        "vmid_duplicate_rejected": vmid_claim is not None,
+        "vmid_store": vmid_store,
+        "attribute_store": attribute_store,
+    }
+
+
+def recover_stage2_page_retype_contract(instructions: Sequence) -> dict:
+    """Recover the bounded subtype contract for a Stage-2 page table."""
+
+    subtype_limit = None
+    subtype_store = None
+    for instruction in instructions:
+        parts = [part.strip().lower() for part in instruction.op_str.split(",")]
+        if (
+            instruction.mnemonic == "cmp"
+            and len(parts) == 2
+            and parts[0] == "w8"
+        ):
+            immediate = parse_immediate_operand(parts[1])
+            if immediate == 4:
+                subtype_limit = immediate
+        elif instruction.mnemonic == "strb" and instruction.op_str == "w2, [x0, #4]":
+            subtype_store = instruction.address
+    return {
+        "status": (
+            "STAGE2_PAGE_RETYPE_CONTRACT_CONFIRMED"
+            if subtype_limit is not None and subtype_store is not None
+            else "PARTIAL"
+        ),
+        "frame_type": 0x20,
+        "subtype_maximum_exclusive": subtype_limit,
+        "subtype_store": subtype_store,
+    }
+
+
+def recover_stage2_root_acquire_contract(instructions: Sequence) -> dict:
+    """Recover the checks applied before a Stage-2 root can be consumed."""
+
+    alignment_mask = None
+    expected_frame_type = None
+    in_flight_increment = None
+    tracked_range_check = False
+    for index, instruction in enumerate(instructions):
+        parts = [part.strip().lower() for part in instruction.op_str.split(",")]
+        if (
+            instruction.mnemonic == "tst"
+            and len(parts) == 2
+            and parts[0] == "x0"
+        ):
+            alignment_mask = parse_immediate_operand(parts[1])
+        elif (
+            instruction.mnemonic == "cmp"
+            and len(parts) == 2
+            and parts[0] == "x8"
+        ):
+            immediate = parse_immediate_operand(parts[1])
+            if immediate == 0x1F:
+                expected_frame_type = immediate
+        elif instruction.mnemonic == "ldaddah":
+            for candidate in reversed(instructions[max(0, index - 3) : index]):
+                candidate_parts = [
+                    part.strip().lower() for part in candidate.op_str.split(",")
+                ]
+                if (
+                    candidate.mnemonic == "mov"
+                    and len(candidate_parts) == 2
+                    and candidate_parts[0] == "w8"
+                ):
+                    in_flight_increment = parse_immediate_operand(candidate_parts[1])
+                    break
+        elif instruction.mnemonic == "subs" and instruction.op_str == "x10, x0, x8":
+            tracked_range_check = True
+
+    return {
+        "status": (
+            "STAGE2_ROOT_ACQUIRE_CONTRACT_CONFIRMED"
+            if alignment_mask == 0x3FFF
+            and expected_frame_type == 0x1F
+            and in_flight_increment == 2
+            and tracked_range_check
+            else "PARTIAL"
+        ),
+        "alignment": alignment_mask + 1 if alignment_mask is not None else None,
+        "tracked_physical_range_required": tracked_range_check,
+        "expected_frame_type": expected_frame_type,
+        "in_flight_increment": in_flight_increment,
+    }
+
+
 def _collect_chained_pointer_slots(image: MachOImage, target: int) -> list[dict]:
     slots = []
     for section in image.binary.sections:
@@ -1129,6 +1286,164 @@ def _collect_dispatch_state_names(image: MachOImage, count: int = 0x17) -> dict:
 def _function_from_exact_anchor(image: MachOImage, value: str) -> int | None:
     function, _ = _function_from_string_anchor(image, rf"^{re.escape(value)}$")
     return function
+
+
+def analyze_sptm_stage2_service_table(
+    image: MachOImage, guest_functions: dict[str, dict]
+) -> dict:
+    """Recover the registered SPTM endpoints that front the guest helpers."""
+
+    va_to_ipa = guest_functions.get("sptm_guest_va_to_ipa", {})
+    va_to_ipa_slots = va_to_ipa.get("pointer_slots", [])
+    if not va_to_ipa_slots:
+        return {"status": "NOT_FOUND", "entries": []}
+
+    entry_stride = 0x10
+    table_base = va_to_ipa_slots[0]["address"] - 0x18 * entry_stride
+    registry_slots = _collect_chained_pointer_slots(image, table_base)
+    registry_entry = next(
+        (slot for slot in registry_slots if slot["section"] == "__late_const"),
+        None,
+    )
+
+    anchored_functions = {
+        "sptm_guest_va_to_ipa": _function_from_exact_anchor(
+            image, "sptm_guest_va_to_ipa"
+        ),
+        "sptm_guest_stage1_tlb_op": _function_from_exact_anchor(
+            image, "sptm_guest_stage1_tlb_op"
+        ),
+        "sptm_guest_dispatch": _function_from_exact_anchor(
+            image, "sptm_guest_dispatch"
+        ),
+        "sptm_guest_exit": _function_from_exact_anchor(image, "sptm_guest_exit"),
+    }
+    acquire_root = _function_from_exact_anchor(image, "acquire_stage2_root_pt")
+    broadcast_tlbi = _function_from_exact_anchor(image, "sptm_broadcast_tlbi")
+    stage2_tlb_function = image.resolve_chained_pointer(
+        image.read_u64(table_base + 0x1A * entry_stride)
+    )
+    stage2_tlb_calls = (
+        {
+            target
+            for instruction in _function_body(image, stage2_tlb_function, 512)
+            if instruction.mnemonic == "bl"
+            for target in [_branch_target(instruction)]
+            if target is not None
+        }
+        if stage2_tlb_function is not None
+        else set()
+    )
+    inferred_stage2_tlb = bool(
+        stage2_tlb_function is not None
+        and acquire_root in stage2_tlb_calls
+        and broadcast_tlbi in stage2_tlb_calls
+    )
+
+    definitions = (
+        (0x18, "sptm_guest_va_to_ipa", "string-anchor"),
+        (0x19, "sptm_guest_stage1_tlb_op", "string-anchor"),
+        (
+            0x1A,
+            "sptm_guest_stage2_tlb_op" if inferred_stage2_tlb else None,
+            "inferred-acquire-root-plus-broadcast-tlbi",
+        ),
+        (0x1B, "sptm_guest_dispatch", "string-anchor"),
+        (0x1C, "sptm_guest_exit", "string-anchor"),
+    )
+    entries = []
+    for endpoint, name, name_source in definitions:
+        address = table_base + endpoint * entry_stride
+        function = image.resolve_chained_pointer(image.read_u64(address))
+        entries.append(
+            {
+                "endpoint": endpoint,
+                "address": address,
+                "function": function,
+                "name": name,
+                "name_source": name_source,
+                "flags": (image.mapped_bytes(address + 8, 1) or b"\0")[0],
+            }
+        )
+
+    retype_function = image.resolve_chained_pointer(
+        image.read_u64(table_base + entry_stride)
+    )
+    retype_anchor = _function_from_exact_anchor(image, "sptm_retype")
+    dispatcher_function = None
+    endpoint_count = None
+    if registry_entry is not None:
+        for reference in image.references_to(registry_entry["address"]):
+            function = image.function_start(reference.address)
+            if function is None:
+                continue
+            body = _function_body(image, function, 512)
+            for instruction in body:
+                parts = [
+                    part.strip().lower() for part in instruction.op_str.split(",")
+                ]
+                if (
+                    instruction.mnemonic == "cmp"
+                    and len(parts) == 2
+                    and parts[0] == "x8"
+                    and parse_immediate_operand(parts[1]) == 0x32
+                ):
+                    dispatcher_function = function
+                    endpoint_count = 0x32
+                    break
+            if endpoint_count is not None:
+                break
+
+    expected = {
+        endpoint: (
+            stage2_tlb_function
+            if endpoint == 0x1A
+            else anchored_functions.get(name)
+        )
+        for endpoint, name, _ in definitions
+    }
+    entries_match = all(
+        entry["function"] is not None
+        and entry["function"] == expected.get(entry["endpoint"])
+        for entry in entries
+    )
+    guest_enter_function = guest_functions.get("sptm_guest_enter", {}).get("function")
+    guest_enter_endpoint = next(
+        (
+            endpoint
+            for endpoint in range(endpoint_count or 0)
+            if image.resolve_chained_pointer(
+                image.read_u64(table_base + endpoint * entry_stride)
+            )
+            == guest_enter_function
+        ),
+        None,
+    )
+    return {
+        "status": (
+            "STAGE2_SERVICE_TABLE_CONFIRMED"
+            if entries_match
+            and registry_entry is not None
+            and endpoint_count == 0x32
+            and retype_function == retype_anchor
+            and inferred_stage2_tlb
+            else "PARTIAL"
+        ),
+        "table_id": 0 if registry_entry is not None else None,
+        "table": table_base,
+        "entry_stride": entry_stride,
+        "endpoint_count": endpoint_count,
+        "registry_entry": registry_entry,
+        "dispatcher": dispatcher_function,
+        "retype_endpoint": {
+            "endpoint": 1,
+            "function": retype_function,
+            "name": "sptm_retype" if retype_function == retype_anchor else None,
+        },
+        "entries": entries,
+        "guest_enter_exposed_as_endpoint": guest_enter_endpoint is not None,
+        "guest_enter_endpoint": guest_enter_endpoint,
+    }
 
 
 def analyze_sptm_stage2_surface(
@@ -1224,6 +1539,8 @@ def analyze_sptm_stage2_surface(
             ],
             "pointer_slots": _collect_chained_pointer_slots(image, function),
         }
+
+    service_table = analyze_sptm_stage2_service_table(image, function_records)
 
     genter_function = role_functions.get("genter_dispatch_entry")
     genter_body = (
@@ -1370,6 +1687,76 @@ def analyze_sptm_stage2_surface(
             )
             frame_policy_rows.append(record)
 
+    row_by_type = {row["frame_type"]: row for row in frame_policy_rows}
+    root_row = row_by_type.get(0x1F, {})
+    page_row = row_by_type.get(0x20, {})
+    root_retype_in = root_row.get("retype_in_callback", {}).get("address")
+    root_retype_out = root_row.get("retype_out_callback", {}).get("address")
+    page_retype_in = page_row.get("retype_in_callback", {}).get("address")
+    page_retype_out = page_row.get("retype_out_callback", {}).get("address")
+    acquire_root = guest_functions.get("acquire_stage2_root_pt")
+    root_in_body = (
+        _function_body(image, root_retype_in, 512)
+        if root_retype_in is not None
+        else []
+    )
+    root_out_body = (
+        _function_body(image, root_retype_out, 512)
+        if root_retype_out is not None
+        else []
+    )
+    page_in_body = (
+        _function_body(image, page_retype_in, 64)
+        if page_retype_in is not None
+        else []
+    )
+    page_out_body = (
+        _function_body(image, page_retype_out, 256)
+        if page_retype_out is not None
+        else []
+    )
+    acquire_body = (
+        _function_body(image, acquire_root, 256) if acquire_root is not None else []
+    )
+    root_retype_contract = recover_stage2_root_retype_contract(root_in_body)
+    page_retype_contract = recover_stage2_page_retype_contract(page_in_body)
+    root_acquire_contract = recover_stage2_root_acquire_contract(acquire_body)
+    root_retype_contract.update(
+        {
+            "callback": root_retype_in,
+            "out_callback": root_retype_out,
+            "out_requires_zero_mapping_refcount": any(
+                instruction.mnemonic == "ldrh"
+                and instruction.op_str == "w9, [x0, #6]"
+                for instruction in root_out_body
+            ),
+            "out_performs_stage2_tlb_invalidation": any(
+                instruction.mnemonic == "tlbi"
+                and instruction.op_str == "vmalls12e1is"
+                for instruction in root_out_body
+            ),
+            "out_releases_vmid_bitmap": any(
+                instruction.mnemonic == "ldclr" for instruction in root_out_body
+            ),
+        }
+    )
+    page_retype_contract.update(
+        {
+            "callback": page_retype_in,
+            "out_callback": page_retype_out,
+            "out_requires_zero_mapping_refcount": any(
+                instruction.mnemonic == "ldrh"
+                and instruction.op_str == "w9, [x0, #8]"
+                for instruction in page_out_body
+            ),
+            "out_requires_zero_nested_refcount": any(
+                instruction.mnemonic == "ldrh"
+                and instruction.op_str == "w10, [x0, #6]"
+                for instruction in page_out_body
+            ),
+        }
+    )
+
     return {
         "status": (
             "STAGE2_SURFACE_PRESENT_SEPARATE_FROM_UAT"
@@ -1391,6 +1778,7 @@ def analyze_sptm_stage2_surface(
             "readers": gate_readers,
         },
         "guest_functions": function_records,
+        "service_table": service_table,
         "genter_dispatch": {
             "function": genter_function,
             "low_level_branches": (
@@ -1409,6 +1797,21 @@ def analyze_sptm_stage2_surface(
             "transitions": dispatch_transitions,
         },
         "frame_policy_rows": frame_policy_rows,
+        "typed_root_lifecycle": {
+            "status": (
+                "TYPED_STAGE2_ROOT_REQUIRED"
+                if root_retype_contract["status"]
+                == "STAGE2_ROOT_RETYPE_CONTRACT_CONFIRMED"
+                and page_retype_contract["status"]
+                == "STAGE2_PAGE_RETYPE_CONTRACT_CONFIRMED"
+                and root_acquire_contract["status"]
+                == "STAGE2_ROOT_ACQUIRE_CONTRACT_CONFIRMED"
+                else "PARTIAL"
+            ),
+            "root_retype": root_retype_contract,
+            "page_retype": page_retype_contract,
+            "root_acquire": root_acquire_contract,
+        },
         "uat_separation": {
             "uat_domain_id": uat_domain_id,
             "stage2_frame_types_direct_uat_mapping_allowed": any(
@@ -2324,7 +2727,7 @@ def build_report(args) -> dict:
         )
     }
     return {
-        "schema": "a15-agx-uppl-producer-v8",
+        "schema": "a15-agx-uppl-producer-v9",
         "scope": "offline-static-only",
         "agx_firmware_providers": providers,
         "sptm_handoffs": handoffs,
@@ -2375,7 +2778,12 @@ def build_report(args) -> dict:
                 "acquisition plus domain/class policy. The iOS 26 Stage-2 surface is "
                 "separate: has-virtualization gates root retyping, SURT allocation, "
                 "and GENTER dispatch; GENTER targets 0x1b/0x1c select services 0xc/0xd "
-                "for the XNU/guest state transitions. Stage-2 frame types retain "
+                "for the XNU/guest state transitions. Registered SPTM table 0 contains "
+                "50 endpoints; its bounded guest subset is 0x18 through 0x1c, while "
+                "guest-enter remains an internal helper. Consuming a guest root "
+                "requires an aligned, tracked frame already typed 0x1f. Retyping "
+                "claims a unique VMID, and retype-out performs a Stage-2-wide TLB "
+                "invalidation before releasing that VMID. Stage-2 frame types retain "
                 "dedicated lifecycle callbacks but have no direct UAT mapping policy."
             ),
             "limitation": (
@@ -2663,6 +3071,50 @@ def render_markdown(report: dict) -> str:
                 f"direct callers `{len(function['direct_calls'])}`; pointer slots "
                 f"`{slots}`."
             )
+        services = stage2.get("service_table", {})
+        registry = services.get("registry_entry") or {}
+        lines.append(
+            f"  SPTM endpoint table `{format_address(services.get('table'))}`: "
+            f"status `{services.get('status')}`, table id "
+            f"`{services.get('table_id')}`, count "
+            f"`{services.get('endpoint_count')}`, registry slot "
+            f"`{format_address(registry.get('address'))}`; guest-enter exposed "
+            f"`{services.get('guest_enter_exposed_as_endpoint')}`."
+        )
+        for endpoint in services.get("entries", []):
+            lines.append(
+                f"  Endpoint `0x{endpoint['endpoint']:x}`: "
+                f"`{endpoint.get('name') or 'unresolved'}` at "
+                f"`{format_address(endpoint.get('function'))}` "
+                f"({endpoint.get('name_source')}, flags "
+                f"`0x{endpoint.get('flags', 0):x}`)."
+            )
+        lifecycle = stage2.get("typed_root_lifecycle", {})
+        root = lifecycle.get("root_retype", {})
+        page = lifecycle.get("page_retype", {})
+        acquire = lifecycle.get("root_acquire", {})
+        lines.append(
+            f"  Typed-root lifecycle `{lifecycle.get('status')}`: acquire alignment "
+            f"`{format_address(acquire.get('alignment'))}`, required type "
+            f"`{format_address(acquire.get('expected_frame_type'))}`, tracked range "
+            f"`{acquire.get('tracked_physical_range_required')}`."
+        )
+        lines.append(
+            f"  Root retype: VMID field shift "
+            f"`{format_address(root.get('vmid_field_shift'))}`, validation "
+            f"`(vmid & {format_address(root.get('vmid_validation_mask'))}) == "
+            f"{format_address(root.get('vmid_validation_value'))}`; unique bitmap "
+            f"claim `{root.get('vmid_duplicate_rejected')}`, retype-out TLBI "
+            f"`{root.get('out_performs_stage2_tlb_invalidation')}`, VMID release "
+            f"`{root.get('out_releases_vmid_bitmap')}`."
+        )
+        lines.append(
+            f"  Page-table retype: subtype limit "
+            f"`{page.get('subtype_maximum_exclusive')}`; retype-out requires zero "
+            f"mapping/nested refs "
+            f"`{page.get('out_requires_zero_mapping_refcount')}/"
+            f"{page.get('out_requires_zero_nested_refcount')}`."
+        )
         for row in stage2["frame_policy_rows"]:
             lines.append(
                 f"  Frame type `0x{row['frame_type']:x}` "
@@ -2674,12 +3126,14 @@ def render_markdown(report: dict) -> str:
     lines.extend(
         [
             "",
-            "The Stage-2 evidence is a private guest-context state machine, not a",
-            "second UAT leaf interface. The device-tree boolean gates the root-table",
-            "retype, SURT allocation, and GENTER paths. The two Stage-2 frame types",
-            "have dedicated retype callbacks but zero IOMMU-domain bitmap and zero",
-            "maximum mapping class, so this report does not identify a UAT-to-Stage-2",
-            "shortcut or a protected-memory bypass.",
+            "The Stage-2 evidence is a typed, private guest-context state machine,",
+            "not a second UAT leaf interface. The device-tree boolean gates the",
+            "root-table retype, SURT allocation, and GENTER paths. The root must",
+            "already be a tracked 0x1f frame with a unique SPTM-owned VMID before",
+            "guest-enter can consume it; guest-enter is not a public table endpoint.",
+            "The two Stage-2 frame types have dedicated lifecycle callbacks but zero",
+            "IOMMU-domain bitmap and zero maximum mapping class, so this report does",
+            "not identify a UAT-to-Stage-2 shortcut or a protected-memory bypass.",
             "",
             "## iOS 26 GFX PatchBay and UPPL state",
             "",

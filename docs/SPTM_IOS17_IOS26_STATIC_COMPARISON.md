@@ -541,6 +541,18 @@ STATE_SPTM_CALLED_BY_XNU`. The dedicated guest state machine therefore exists
 only on the newer sample, while its two frame-policy rows remain outside every
 IOMMU-domain mapping class recovered for UAT.
 
+The v9 pass resolves the newer sample's service ownership and page lifecycle.
+SPTM table `0` has 50 endpoints and places the bounded guest operations at
+`0x18` through `0x1c`; `sptm_guest_enter` has no registered endpoint slot. Root
+consumers require a `0x4000`-aligned, tracked `XNU_STAGE2_ROOT_TABLE (0x1f)`
+frame. That type is created through `sptm_retype`, which validates geometry,
+claims a unique encoded VMID, and records protected metadata. Retype-out
+requires zero mappings, performs `VMALLS12E1IS`, and releases the VMID.
+`XNU_STAGE2_PAGE_TABLE (0x20)` likewise carries a bounded subtype and cannot be
+retyped out with mapping or nested references. No corresponding guest surface
+or typed lifecycle appears in the exact `21B91` sample, and none of these
+operations adds a UAT-domain permission.
+
 | v10 artifact | SHA-256 |
 |---|---|
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
