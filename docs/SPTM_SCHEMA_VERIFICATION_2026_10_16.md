@@ -173,3 +173,9 @@ dyld images. It does not call an `hv_*` symbol, open an IOKit user client,
 transfer an IPC right, or write kernel/protected memory. Its purpose is to
 identify the next actually exposed edge, not to assume that the private
 Stage-2 service has a public framework frontend.
+
+The v2 implementation compiled successfully from commit `e9118ee` in Actions
+run `38898440663`. Inspection of the resulting IPA confirmed every new
+checkpoint marker and no Hypervisor entitlement in the signed XML entitlement
+slot. Its SHA-256 is
+`7D9313F680187201DFF6988C29F4B17A83D27FDA1253CAEEBC331F6FA15CED16`.

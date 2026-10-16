@@ -637,6 +637,14 @@ checking loaded dyld image names. It never opens an IOKit user client. This
 separates an absent public ABI from a private runtime service that remains
 observable on the exact device.
 
+Commit `e9118ee` built successfully in GitHub Actions run `38898440663`.
+Package inspection found every v2 path, dyld, device-tree, and IORegistry
+checkpoint in the executable. The embedded XML entitlement blob again
+contained no Hypervisor key. The stable local artifact is
+`outputs/iphone-system/Dopamine-A15-iOS26-hypervisor-preflight-v2-e9118ee.ipa`
+(55,481,421 bytes, SHA-256
+`7D9313F680187201DFF6988C29F4B17A83D27FDA1253CAEEBC331F6FA15CED16`).
+
 ### Verification
 
 - `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests
