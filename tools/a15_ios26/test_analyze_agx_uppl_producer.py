@@ -12,7 +12,12 @@ from analyze_agx_uppl_producer import (
     decode_domain_bitmap,
     decode_frame_type_policy_record,
     decode_patch_descriptor_bytes,
+    recover_argument_bindings,
+    recover_legacy_register_mapping_policy,
+    recover_legacy_uat_leaf_mapping_contract,
     recover_selector_type_pairs,
+    recover_uat_leaf_mapping_contract,
+    summarize_domain_mapping_policy,
 )
 
 
@@ -146,6 +151,104 @@ class StateReferenceTests(unittest.TestCase):
 
 
 class RegistrationCallTests(unittest.TestCase):
+    def test_recovers_producer_argument_bindings(self) -> None:
+        body = [
+            object_instruction(0x2F00, "pacibsp"),
+            object_instruction(0x2F04, "mov", "x21, x4"),
+            object_instruction(0x2F08, "mov", "x22, x3"),
+            object_instruction(0x2F0C, "mov", "x23, x2"),
+            object_instruction(0x2F10, "mov", "x24, x1"),
+            object_instruction(0x2F14, "mov", "x19, x0"),
+        ]
+        self.assertEqual(
+            recover_argument_bindings(body),
+            {"x4": "x21", "x3": "x22", "x2": "x23", "x1": "x24", "x0": "x19"},
+        )
+
+    def test_recovers_uat_leaf_mapping_contract(self) -> None:
+        body = [
+            object_instruction(0x3000, "ldr", "w8, [x19, #0x40]"),
+            object_instruction(0x3004, "and", "x23, x27, #0xfffffffff000"),
+            object_instruction(0x3008, "mov", "w9, #1"),
+            object_instruction(0x300C, "cinc", "w9, w9, eq"),
+            object_instruction(0x3010, "and", "w1, w9, #0xff"),
+            object_instruction(0x3014, "mov", "x0, x23"),
+            object_instruction(0x3018, "bl", "#0x9000"),
+        ]
+        result = recover_uat_leaf_mapping_contract(body, 0x9000)
+        self.assertEqual(result["status"], "UAT_LEAF_MAPPING_CONTRACT_CONFIRMED")
+        self.assertEqual(result["physical_page_mask"], 0xFFFFFFFFF000)
+        self.assertEqual(result["requested_mapping_classes"], [1, 2])
+
+    def test_recovers_legacy_uat_leaf_mapping_contract(self) -> None:
+        body = [
+            object_instruction(0x3000, "and", "x23, x20, #0xfffffffff000"),
+            object_instruction(0x3004, "mov", "w1, #1"),
+            object_instruction(0x3008, "mov", "x0, x23"),
+            object_instruction(0x300C, "bl", "#0x9000"),
+            object_instruction(0x3010, "mov", "w1, #0"),
+            object_instruction(0x3014, "b", "#0x3008"),
+        ]
+        result = recover_legacy_uat_leaf_mapping_contract(body, 0x9000)
+        self.assertEqual(
+            result["status"], "LEGACY_UAT_LEAF_MAPPING_CONTRACT_CONFIRMED"
+        )
+        self.assertEqual(result["physical_page_mask"], 0xFFFFFFFFF000)
+        self.assertEqual(result["legacy_registration_modes"], [0, 1])
+        self.assertEqual(result["requested_mapping_classes"], [])
+
+    def test_recovers_legacy_direct_frame_type_policy(self) -> None:
+        body = [
+            object_instruction(0x4000, "ldrb", "w22, [x0, #2]"),
+            object_instruction(0x4004, "cmp", "w22, #0xb"),
+            object_instruction(0x4008, "b.eq", "#0x4040"),
+            object_instruction(0x400C, "cmp", "w22, #0x19"),
+            object_instruction(0x4010, "b.eq", "#0x4050"),
+        ]
+        result = recover_legacy_register_mapping_policy(body)
+        self.assertEqual(
+            result["status"], "LEGACY_DIRECT_FRAME_TYPE_POLICY_CONFIRMED"
+        )
+        self.assertEqual(
+            [entry["frame_type"] for entry in result["accepted_frame_types"]],
+            [0x0B, 0x19],
+        )
+
+    def test_summarizes_domain_mapping_candidates_by_class(self) -> None:
+        records = [
+            {
+                "frame_type": 0x19,
+                "frame_type_name": "XNU_IO",
+                "allowed_domain_bitmap": 1 << 7,
+                "maximum_mapping_class": 2,
+            },
+            {
+                "frame_type": 0x22,
+                "frame_type_name": "XNU_CPUTRACE_PA_BUFFER",
+                "allowed_domain_bitmap": (1 << 2) | (1 << 7),
+                "maximum_mapping_class": 1,
+            },
+        ]
+        result = summarize_domain_mapping_policy(
+            records,
+            7,
+            [1, 2],
+            {0x17: "XNU_IOMMU", 0x19: "XNU_IO", 0x1A: "XNU_PROTECTED_IO"},
+        )
+        self.assertEqual(
+            [entry["frame_type"] for entry in result["candidates_by_mapping_class"][0]["frame_types"]],
+            [0x19, 0x22],
+        )
+        self.assertEqual(
+            [entry["frame_type"] for entry in result["candidates_by_mapping_class"][1]["frame_types"]],
+            [0x19],
+        )
+        focus = {entry["frame_type"]: entry for entry in result["focus_frame_types"]}
+        self.assertTrue(focus[0x19]["allowed_for_domain"])
+        self.assertFalse(focus[0x1A]["allowed_for_domain"])
+        self.assertFalse(focus[0x1F]["allowed_for_domain"])
+        self.assertFalse(focus[0x20]["allowed_for_domain"])
+
     def test_recovers_existing_region_type_selector_pair(self) -> None:
         body = [
             object_instruction(0x2FD0, "cmp", "w8, #2"),

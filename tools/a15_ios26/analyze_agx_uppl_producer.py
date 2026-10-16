@@ -733,6 +733,306 @@ def _recent_w2_immediate(body: Sequence, index: int) -> int | None:
     return _recent_register_immediate(body, index, "w2")
 
 
+def recover_argument_bindings(body: Sequence, limit: int = 32) -> dict[str, str]:
+    """Recover the entry-register saves made by a function prologue."""
+    bindings: dict[str, str] = {}
+    for instruction in body[:limit]:
+        if instruction.mnemonic != "mov":
+            continue
+        parts = [part.strip().lower() for part in instruction.op_str.split(",")]
+        if len(parts) != 2 or not re.fullmatch(r"x(?:1[9]|2[0-8])", parts[0]):
+            continue
+        if re.fullmatch(r"x[0-7]", parts[1]):
+            bindings.setdefault(parts[1], parts[0])
+    return bindings
+
+
+def recover_uat_leaf_mapping_contract(
+    body: Sequence, register_mapping: int
+) -> dict:
+    """Recover the leaf address and class arguments at UAT registration."""
+    for index, instruction in enumerate(body):
+        if instruction.mnemonic != "bl" or _branch_target(instruction) != register_mapping:
+            continue
+        window = body[max(0, index - 80) : index]
+        address_mask = next(
+            (
+                parse_immediate_operand(parts[2])
+                for candidate in reversed(window)
+                if candidate.mnemonic == "and"
+                and len(parts := [
+                    part.strip().lower() for part in candidate.op_str.split(",")
+                ]) == 3
+                and parts[:2] == ["x23", "x27"]
+            ),
+            None,
+        )
+        map_options_read = next(
+            (
+                candidate.address
+                for candidate in window
+                if candidate.mnemonic == "ldr"
+                and candidate.op_str.lower() == "w8, [x19, #0x40]"
+            ),
+            None,
+        )
+        class_seed = next(
+            (
+                candidate.address
+                for candidate in window
+                if candidate.mnemonic == "mov"
+                and candidate.op_str.lower() == "w9, #1"
+            ),
+            None,
+        )
+        class_increment = next(
+            (
+                candidate.address
+                for candidate in window
+                if candidate.mnemonic == "cinc"
+                and candidate.op_str.lower() == "w9, w9, eq"
+            ),
+            None,
+        )
+        class_argument = next(
+            (
+                candidate.address
+                for candidate in window
+                if candidate.mnemonic == "and"
+                and candidate.op_str.lower() == "w1, w9, #0xff"
+            ),
+            None,
+        )
+        address_argument = next(
+            (
+                candidate.address
+                for candidate in window
+                if candidate.mnemonic == "mov"
+                and candidate.op_str.lower() == "x0, x23"
+            ),
+            None,
+        )
+        confirmed = all(
+            value is not None
+            for value in (
+                address_mask,
+                map_options_read,
+                class_seed,
+                class_increment,
+                class_argument,
+                address_argument,
+            )
+        )
+        return {
+            "status": "UAT_LEAF_MAPPING_CONTRACT_CONFIRMED" if confirmed else "PARTIAL",
+            "register_mapping_call": instruction.address,
+            "physical_address_source": "x27",
+            "physical_page_mask": address_mask,
+            "map_options_offset": 0x40 if map_options_read is not None else None,
+            "map_options_read": map_options_read,
+            "mapping_class_seed": class_seed,
+            "mapping_class_increment": class_increment,
+            "mapping_class_argument": class_argument,
+            "physical_address_argument": address_argument,
+            "requested_mapping_classes": [1, 2] if confirmed else [],
+        }
+    return {"status": "NOT_FOUND", "requested_mapping_classes": []}
+
+
+def recover_legacy_uat_leaf_mapping_contract(
+    body: Sequence, register_mapping: int
+) -> dict:
+    """Recover the pre-policy-table UAT registration call contract."""
+    for index, instruction in enumerate(body):
+        if instruction.mnemonic != "bl" or _branch_target(instruction) != register_mapping:
+            continue
+        window = body[max(0, index - 80) : index]
+        address_mask = next(
+            (
+                parse_immediate_operand(parts[2])
+                for candidate in reversed(window)
+                if candidate.mnemonic == "and"
+                and len(parts := [
+                    part.strip().lower() for part in candidate.op_str.split(",")
+                ]) == 3
+                and parts[:2] == ["x23", "x20"]
+            ),
+            None,
+        )
+        registration_modes = {
+            immediate
+            for candidate in window
+            if candidate.mnemonic == "mov"
+            and len(parts := [
+                part.strip().lower() for part in candidate.op_str.split(",")
+            ]) == 2
+            and parts[0] == "w1"
+            and (immediate := parse_immediate_operand(parts[1])) in {0, 1}
+        }
+        for candidate_index, candidate in enumerate(body):
+            if candidate.mnemonic != "mov":
+                continue
+            parts = [part.strip().lower() for part in candidate.op_str.split(",")]
+            if len(parts) != 2 or parts[0] != "w1":
+                continue
+            immediate = parse_immediate_operand(parts[1])
+            if immediate not in {0, 1}:
+                continue
+            if any(
+                branch.mnemonic == "b"
+                and _branch_target(branch) == instruction.address - 4
+                for branch in body[candidate_index + 1 : candidate_index + 3]
+            ):
+                registration_modes.add(immediate)
+        registration_modes = sorted(registration_modes)
+        confirmed = address_mask is not None and registration_modes == [0, 1]
+        return {
+            "status": (
+                "LEGACY_UAT_LEAF_MAPPING_CONTRACT_CONFIRMED"
+                if confirmed
+                else "PARTIAL"
+            ),
+            "register_mapping_call": instruction.address,
+            "physical_address_source": "x20",
+            "physical_page_mask": address_mask,
+            "legacy_registration_modes": registration_modes,
+            "requested_mapping_classes": [],
+        }
+    return {
+        "status": "NOT_FOUND",
+        "legacy_registration_modes": [],
+        "requested_mapping_classes": [],
+    }
+
+
+def recover_legacy_register_mapping_policy(body: Sequence) -> dict:
+    """Recover direct frame-type allow branches used before policy tables."""
+    type_read_index = next(
+        (
+            index
+            for index, instruction in enumerate(body)
+            if instruction.mnemonic == "ldrb"
+            and re.fullmatch(r"w\d+, \[x0, #2\]", instruction.op_str.lower())
+        ),
+        None,
+    )
+    if type_read_index is None:
+        return {"status": "NOT_FOUND", "accepted_frame_types": []}
+
+    type_read = body[type_read_index]
+    type_register = type_read.op_str.split(",", 1)[0].strip().lower()
+    accepted = []
+    for index in range(type_read_index + 1, min(len(body), type_read_index + 32)):
+        instruction = body[index]
+        parts = [part.strip().lower() for part in instruction.op_str.split(",")]
+        if instruction.mnemonic != "cmp" or len(parts) != 2:
+            continue
+        if parts[0] != type_register:
+            continue
+        frame_type = parse_immediate_operand(parts[1])
+        if frame_type is None:
+            continue
+        branch = next(
+            (
+                candidate
+                for candidate in body[index + 1 : index + 3]
+                if candidate.mnemonic == "b.eq"
+            ),
+            None,
+        )
+        if branch is None:
+            continue
+        accepted.append(
+            {
+                "frame_type": frame_type,
+                "frame_type_name": {
+                    0x0B: "XNU_DEFAULT",
+                    0x19: "XNU_IO",
+                }.get(frame_type),
+                "compare": instruction.address,
+                "accepted_branch": branch.address,
+                "accepted_target": _branch_target(branch),
+            }
+        )
+
+    return {
+        "status": (
+            "LEGACY_DIRECT_FRAME_TYPE_POLICY_CONFIRMED"
+            if [entry["frame_type"] for entry in accepted] == [0x0B, 0x19]
+            else "PARTIAL"
+        ),
+        "frame_type_offset": 2,
+        "frame_type_read": type_read.address,
+        "accepted_frame_types": accepted,
+    }
+
+
+def summarize_domain_mapping_policy(
+    records: Sequence[dict],
+    domain_id: int,
+    requested_classes: Sequence[int],
+    frame_type_names: dict[int, str],
+) -> dict:
+    source_domain_records = [
+        record
+        for record in records
+        if record["allowed_domain_bitmap"] & (1 << domain_id)
+    ]
+    domain_records = [
+        {
+            "frame_type": record["frame_type"],
+            "frame_type_name": record.get("frame_type_name"),
+            "allowed_domain_bitmap": record["allowed_domain_bitmap"],
+            "maximum_mapping_class": record["maximum_mapping_class"],
+        }
+        for record in source_domain_records
+    ]
+    candidates = []
+    for mapping_class in requested_classes:
+        candidates.append(
+            {
+                "mapping_class": mapping_class,
+                "frame_types": [
+                    {
+                        "frame_type": record["frame_type"],
+                        "frame_type_name": record.get("frame_type_name"),
+                        "maximum_mapping_class": record["maximum_mapping_class"],
+                    }
+                    for record in domain_records
+                    if record["maximum_mapping_class"] >= mapping_class
+                ],
+            }
+        )
+    allowed_ids = {record["frame_type"] for record in domain_records}
+    focus = []
+    for frame_type in (
+        0x0B,
+        0x17,
+        0x19,
+        0x1A,
+        0x1F,
+        0x20,
+        0x22,
+        0x23,
+        0x24,
+        0x25,
+    ):
+        focus.append(
+            {
+                "frame_type": frame_type,
+                "frame_type_name": frame_type_names.get(frame_type),
+                "allowed_for_domain": frame_type in allowed_ids,
+            }
+        )
+    return {
+        "domain_id": domain_id,
+        "requested_mapping_classes": list(requested_classes),
+        "allowed_frame_types": domain_records,
+        "candidates_by_mapping_class": candidates,
+        "focus_frame_types": focus,
+    }
+
+
 def _function_from_string_anchor(
     image: MachOImage, pattern: str
 ) -> tuple[int | None, list[dict]]:
@@ -750,6 +1050,12 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
     frame_acquire, acquire_anchors = _function_from_string_anchor(
         image, r"^iommu_frame_acquire_type$"
     )
+    frame_acquire_api = "iommu_frame_acquire_type"
+    if frame_acquire is None:
+        frame_acquire, acquire_anchors = _function_from_string_anchor(
+            image, r"^iommu_frame_acquire$"
+        )
+        frame_acquire_api = "iommu_frame_acquire"
     register_mapping, register_anchors = _function_from_string_anchor(
         image, r"^iommu_register_mapping$"
     )
@@ -766,6 +1072,29 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
     map_body = _function_body(image, map_continue, 1024)
     register_body = _function_body(image, register_mapping, 512)
     acquire_body = _function_body(image, frame_acquire, 512)
+    typed_frame_acquire = frame_acquire_api == "iommu_frame_acquire_type"
+    leaf_mapping_contract = (
+        recover_uat_leaf_mapping_contract(map_body, register_mapping)
+        if typed_frame_acquire
+        else recover_legacy_uat_leaf_mapping_contract(map_body, register_mapping)
+    )
+    legacy_mapping_policy = (
+        {"status": "NOT_APPLICABLE", "accepted_frame_types": []}
+        if typed_frame_acquire
+        else recover_legacy_register_mapping_policy(register_body)
+    )
+
+    producer_anchor_functions: dict[int, set[str]] = {}
+    for entry in image.referenced_strings(
+        r"^(?:acquire_uat_segments_page|uat_copy_segments_locally|"
+        r"segments_page|num_segments|validate_uat_map_options|map_options)$"
+    ):
+        for reference in entry["references"]:
+            function = image.function_start(reference["address"])
+            if function is not None:
+                producer_anchor_functions.setdefault(function, set()).add(
+                    entry["value"]
+                )
 
     map_acquire_calls = []
     register_calls = []
@@ -777,8 +1106,10 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
             map_acquire_calls.append(
                 {
                     "address": instruction.address,
-                    "requested_type": _recent_register_immediate(
-                        map_body, index, "w1"
+                    "requested_type": (
+                        _recent_register_immediate(map_body, index, "w1")
+                        if typed_frame_acquire
+                        else None
                     ),
                 }
             )
@@ -791,8 +1122,10 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
             register_acquire_calls.append(
                 {
                     "address": instruction.address,
-                    "requested_type": _recent_register_immediate(
-                        register_body, index, "w1"
+                    "requested_type": (
+                        _recent_register_immediate(register_body, index, "w1")
+                        if typed_frame_acquire
+                        else None
                     ),
                 }
             )
@@ -800,7 +1133,10 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
     request_producers = []
     seen_callers = set()
     for instruction in image.instructions:
-        if instruction.mnemonic != "bl" or _branch_target(instruction) != map_continue:
+        if (
+            instruction.mnemonic not in {"b", "bl"}
+            or _branch_target(instruction) != map_continue
+        ):
             continue
         caller = image.function_start(instruction.address)
         if caller is None or caller == map_continue or caller in seen_callers:
@@ -813,8 +1149,10 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
                 descriptor_acquires.append(
                     {
                         "address": candidate.address,
-                        "requested_type": _recent_register_immediate(
-                            caller_body, index, "w1"
+                        "requested_type": (
+                            _recent_register_immediate(caller_body, index, "w1")
+                            if typed_frame_acquire
+                            else None
                         ),
                     }
                 )
@@ -822,7 +1160,35 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
             {
                 "function": caller,
                 "map_continue_call": instruction.address,
+                "map_continue_call_kind": (
+                    "tail-call" if instruction.mnemonic == "b" else "call"
+                ),
                 "frame_acquire_calls": descriptor_acquires,
+                "role": (
+                    "acquire_uat_segments_page"
+                    if "acquire_uat_segments_page"
+                    in producer_anchor_functions.get(caller, set())
+                    else (
+                        "legacy_uat_map_request"
+                        if instruction.mnemonic == "b"
+                        else None
+                    )
+                ),
+                "diagnostic_anchors": sorted(
+                    producer_anchor_functions.get(caller, set())
+                ),
+                "argument_bindings": recover_argument_bindings(caller_body),
+                "named_input_arguments": (
+                    {
+                        "segments_page": "x2",
+                        "num_segments": "x3",
+                        "map_options": "x4",
+                    }
+                    if "acquire_uat_segments_page"
+                    in producer_anchor_functions.get(caller, set())
+                    or instruction.mnemonic == "b"
+                    else {}
+                ),
             }
         )
 
@@ -944,20 +1310,33 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
     return {
         "status": (
             "FRAME_TYPE_AND_MAPPING_POLICY_CONFIRMED"
-            if map_acquire_calls
+            if typed_frame_acquire
+            and map_acquire_calls
             and register_calls
             and register_acquire_calls
             and frame_type_read is not None
             and policy_type_read is not None
+            else "LEGACY_DIRECT_TYPE_POLICY_CONFIRMED"
+            if not typed_frame_acquire
+            and map_acquire_calls
+            and register_calls
+            and register_acquire_calls
+            and legacy_mapping_policy["status"]
+            == "LEGACY_DIRECT_FRAME_TYPE_POLICY_CONFIRMED"
             else "PARTIAL"
         ),
         "functions": {
             "sptm_uat_map_continue": map_continue,
-            "iommu_frame_acquire_type": frame_acquire,
+            "frame_acquire_api": frame_acquire_api,
+            "iommu_frame_acquire": frame_acquire,
+            "iommu_frame_acquire_type": (
+                frame_acquire if typed_frame_acquire else None
+            ),
             "iommu_register_mapping": register_mapping,
         },
         "map_continue_frame_acquire_calls": map_acquire_calls,
         "map_continue_register_mapping_calls": register_calls,
+        "leaf_mapping_contract": leaf_mapping_contract,
         "register_mapping_frame_acquire_calls": register_acquire_calls,
         "map_request_producers": request_producers,
         "frame_metadata": {
@@ -979,6 +1358,7 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
             "maximum_mapping_class_read": mapping_class_limit_read,
             "allowed_frame_types": allowed_policy_records,
         },
+        "legacy_mapping_policy": legacy_mapping_policy,
     }
 
 
@@ -1215,6 +1595,25 @@ def analyze_sptm_handoff(path: pathlib.Path, label: str) -> dict:
             record["allowed_domain_bitmap"], domain_names
         )
     mapping_policy["known_iommu_domains"] = domain_names
+    uat_domain_id = next(
+        (domain_id for domain_id, name in domain_names.items() if name == "uat"),
+        None,
+    )
+    if uat_domain_id is not None:
+        frame_type_names = {
+            entry["frame_type"]: entry["name"]
+            for entry in mapping_policy.get("frame_type_names", {}).get(
+                "entries", []
+            )
+        }
+        mapping_policy["uat_domain_policy"] = summarize_domain_mapping_policy(
+            mapping_policy.get("allowed_frame_types", []),
+            uat_domain_id,
+            uat_frame_policy.get("leaf_mapping_contract", {}).get(
+                "requested_mapping_classes", []
+            ),
+            frame_type_names,
+        )
     return {
         "label": label,
         "path": str(path),
@@ -1538,7 +1937,7 @@ def build_report(args) -> dict:
         )
     }
     return {
-        "schema": "a15-agx-uppl-producer-v5",
+        "schema": "a15-agx-uppl-producer-v7",
         "scope": "offline-static-only",
         "agx_firmware_providers": providers,
         "sptm_handoffs": handoffs,
@@ -1555,6 +1954,9 @@ def build_report(args) -> dict:
                 ios26_dynamic_type in ios26_allowed_types
                 if ios26_dynamic_type is not None
                 else None
+            ),
+            "stage2_frame_types_direct_uat_mapping_allowed": bool(
+                {0x1F, 0x20} & ios26_allowed_types
             ),
             "route": (
                 "The legacy AGX firmware-provider method is no longer usable. PatchBay "
@@ -1574,7 +1976,15 @@ def build_report(args) -> dict:
                 "XNU_CPUTRACE_VA_BUFFER; their domain-7 permission is a CPU-trace/UAT "
                 "route, not an unidentified AGX leaf type. Type 0x3b is "
                 "TXM_SEP_SECURE_CHANNEL and is likewise unrelated to the immediate "
-                "AGX mapping path."
+                "AGX mapping path. The direct protected producer is identified as "
+                "acquire_uat_segments_page. It validates a default-type descriptor "
+                "page and feeds segment count and map options into map continuation. "
+                "That continuation registers leaf pages with mapping class 1 or 2. "
+                "For UAT domain 7, XNU_IO is eligible while XNU_PROTECTED_IO is not. "
+                "The exact iOS 17 predecessor uses the untyped iommu_frame_acquire "
+                "API and a direct two-type allow switch for XNU_DEFAULT/XNU_IO with "
+                "registration modes 0/1; iOS 26 replaces that switch with typed "
+                "acquisition plus domain/class policy."
             ),
             "limitation": (
                 "Static evidence does not show that the exact A15 payload ever replaces "
@@ -1660,12 +2070,15 @@ def render_markdown(report: dict) -> str:
         map_types = [
             call.get("requested_type")
             for call in policy.get("map_continue_frame_acquire_calls", [])
+            if call.get("requested_type") is not None
         ]
         register_types = [
             call.get("requested_type")
             for call in policy.get("register_mapping_frame_acquire_calls", [])
+            if call.get("requested_type") is not None
         ]
         map_function = functions.get("sptm_uat_map_continue")
+        acquire_api = functions.get("frame_acquire_api")
         mapping_policy = policy.get("mapping_policy", {})
         allowed_types = [
             f"0x{record['frame_type']:x}"
@@ -1674,9 +2087,35 @@ def render_markdown(report: dict) -> str:
         lines.append(
             f"- **{item['label']}**: `{policy['status']}`; map-continue="
             f"`{'-' if map_function is None else f'0x{map_function:x}'}`, "
-            f"frame acquisition selectors=`{map_types}`, mapping registration "
+            f"acquisition API=`{acquire_api or '-'}`, typed acquisition "
+            f"selectors=`{map_types}`, registration acquisition "
             f"selectors=`{register_types}`."
         )
+        leaf_contract = policy.get("leaf_mapping_contract", {})
+        if leaf_contract.get("register_mapping_call") is not None:
+            mask = leaf_contract.get("physical_page_mask")
+            lines.append(
+                f"  Leaf contract: `{leaf_contract.get('status')}` at "
+                f"`0x{leaf_contract['register_mapping_call']:x}`; physical mask "
+                f"`{'-' if mask is None else f'0x{mask:x}'}`; requested mapping "
+                f"classes `{leaf_contract.get('requested_mapping_classes', [])}`."
+            )
+            if leaf_contract.get("legacy_registration_modes"):
+                lines.append(
+                    "  Legacy registration modes: "
+                    f"`{leaf_contract['legacy_registration_modes']}`; these are "
+                    "not the iOS 26 mapping-class values."
+                )
+        legacy_policy = policy.get("legacy_mapping_policy", {})
+        if legacy_policy.get("accepted_frame_types"):
+            accepted = [
+                entry.get("frame_type_name") or f"0x{entry['frame_type']:x}"
+                for entry in legacy_policy["accepted_frame_types"]
+            ]
+            lines.append(
+                f"  Direct legacy type policy: `{legacy_policy['status']}`; "
+                f"accepted frame types `{accepted}`."
+            )
         if mapping_policy.get("descriptor_table") is not None:
             lines.append(
                 f"  Policy table: `0x{mapping_policy['descriptor_table']:x}`; "
@@ -1709,15 +2148,46 @@ def render_markdown(report: dict) -> str:
                     "  Retype callbacks: `" + ", ".join(callback_text) + "`; "
                     f"policy byte `+0x11=0x{record['mapping_policy_byte_0x11']:x}`."
                 )
+            uat_policy = mapping_policy.get("uat_domain_policy", {})
+            if uat_policy:
+                for entry in uat_policy.get("candidates_by_mapping_class", []):
+                    candidate_names = [
+                        candidate.get("frame_type_name")
+                        or f"0x{candidate['frame_type']:x}"
+                        for candidate in entry["frame_types"]
+                    ]
+                    lines.append(
+                        f"  UAT domain `{uat_policy['domain_id']}`, mapping class "
+                        f"`{entry['mapping_class']}` candidates: `{candidate_names}`."
+                    )
+                focus = {
+                    entry.get("frame_type_name"): entry["allowed_for_domain"]
+                    for entry in uat_policy.get("focus_frame_types", [])
+                }
+                lines.append(
+                    "  Protected-I/O split: "
+                    f"`XNU_IO={focus.get('XNU_IO')}`, "
+                    f"`XNU_PROTECTED_IO={focus.get('XNU_PROTECTED_IO')}`."
+                )
+                lines.append(
+                    "  Stage-2 split: "
+                    f"`XNU_STAGE2_ROOT_TABLE="
+                    f"{focus.get('XNU_STAGE2_ROOT_TABLE')}`, "
+                    f"`XNU_STAGE2_PAGE_TABLE="
+                    f"{focus.get('XNU_STAGE2_PAGE_TABLE')}`."
+                )
         for producer in policy.get("map_request_producers", []):
             descriptor_types = [
                 call.get("requested_type")
                 for call in producer.get("frame_acquire_calls", [])
             ]
             lines.append(
-                f"  Direct request producer: `0x{producer['function']:x}` calls "
+                f"  Direct request producer "
+                f"`{producer.get('role') or 'unresolved'}`: "
+                f"`0x{producer['function']:x}` calls "
                 f"map continuation at `0x{producer['map_continue_call']:x}`; "
-                f"descriptor-frame selectors=`{descriptor_types}`."
+                f"descriptor-frame selectors=`{descriptor_types}`; inputs="
+                f"`{producer.get('named_input_arguments', {})}`."
             )
     lines.extend(
         [
@@ -1727,9 +2197,22 @@ def render_markdown(report: dict) -> str:
             "then reads the actual frame type before consulting per-type domain and",
             "mapping-type policy. Dynamic GFX registration therefore feeds protected",
             "metadata; it does not by itself authorize an arbitrary UAT mapping.",
+            "The direct producer is `acquire_uat_segments_page`: it validates the",
+            "descriptor page as `XNU_DEFAULT (0xb)`, copies segment descriptors, and",
+            "passes `num_segments` plus `map_options` into map continuation. The leaf",
+            "physical address is page-masked and registered with class `1` or `2`.",
+            "For named UAT domain 7, `XNU_IO (0x19)` is eligible for both classes,",
+            "while `XNU_PROTECTED_IO (0x1a)` is not eligible in this policy table.",
             "The selector-1 GFX-data compatibility type is `2`; its policy row has",
             "a zero domain bitmap and zero maximum mapping class, so this registered",
             "region is not itself accepted as a direct UAT leaf-mapping target.",
+            "On exact `21B91`, the corresponding route uses the older",
+            "`iommu_frame_acquire` signature. `iommu_register_mapping` reads the",
+            "actual frame type directly and has accepting branches only for",
+            "`XNU_DEFAULT (0xb)` and `XNU_IO (0x19)`. Its `0/1` registration-mode",
+            "argument is structurally distinct from the `1/2` class argument on",
+            "`23A355`. This is the concrete version transition; it is not evidence",
+            "that either policy can be bypassed.",
             "",
             "## iOS 26 GFX PatchBay and UPPL state",
             "",

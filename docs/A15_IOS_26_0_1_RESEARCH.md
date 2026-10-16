@@ -1333,8 +1333,75 @@ the old type is `0x11`, and its retype-out callback is
 no-op callbacks. Their domain permissions therefore describe CPU-trace/UAT
 and SEP/SART integration, not unidentified AGX leaf types.
 
-The remaining protected boundary is concentrated on the real mapping input:
-the UAT page-table requirement `XNU_IOMMU (0x17)` and the leaf-frame
-provenance, especially `XNU_IO (0x19)`, `XNU_PROTECTED_IO (0x1a)`, or a
-dynamically registered GFX type. That offline distinction comes before any
-further on-device probe.
+The remaining protected boundary is concentrated on the real mapping input.
+The UAT page-table requirement remains `XNU_IOMMU (0x17)`, but the leaf
+policy is now narrower than the earlier hypothesis. The direct producer at
+`0xfffffff0270a1d58` is anchored as `acquire_uat_segments_page`; it validates
+the page containing segment descriptors as `XNU_DEFAULT (0x0b)` and calls
+`sptm_uat_map_continue` at `0xfffffff0270a1ef0`.
+
+Inside map continuation, the leaf physical address is page-masked with
+`0xfffffffff000`. A lookup derived from `map_options` selects mapping class
+`1` or `2` before `iommu_register_mapping` at `0xfffffff0270a181c`. For named
+UAT domain 7, `XNU_IO (0x19)` is permitted with maximum class 2, while
+`XNU_PROTECTED_IO (0x1a)` has no permission in this table. The next offline
+task is therefore segment provenance and exact map-option semantics, not a
+binary choice between those two types.
+
+The same analyzer now resolves the exact `21B91` predecessor rather than
+reporting it absent. That image names the acquisition primitive
+`iommu_frame_acquire` and uses `sptm_uat_map_continue` at
+`0xfffffff00706fd5c`. Its leaf address is masked with the same
+`0xfffffffff000` page mask, but `iommu_register_mapping` receives legacy mode
+`0` or `1`. The registrar at `0xfffffff007088760` reads frame metadata `+0x2`
+and directly accepts only `XNU_DEFAULT (0xb)` or `XNU_IO (0x19)`. There is no
+authenticated per-domain/per-class descriptor table on this path. The
+request function at `0xfffffff0070703b4` tail-calls map continuation and its
+copy helper validates the descriptor page as `XNU_DEFAULT`, making the
+producer structure comparable while keeping the policy semantics distinct.
+
+## Public-Source Cross-Check
+
+The public sources do not provide a shortcut around this boundary:
+
+- arXiv 2510.09272 validates the frame-retype/rule-set model on a mostly A18
+  iOS 18.4 baseline and records `XNU_DEFAULT <-> XNU_IOMMU` lifecycle
+  transitions, but does not expose this proprietary UAT leaf policy.
+- Tin-Z's starter pack is introductory and contains a stale claim that no
+  public iOS 17 SPTM bypass exists. Its generic page types and EL2 diagram are
+  not substitutes for the authenticated 23A355 frame table or GXF levels.
+- The pasted `cloverfield11/ios26-hypervisor-research` note targets
+  iPhone15,2/A16 on iOS 26.4.1 build 23E254. Its public repository currently
+  contains a README and two commits rather than a reproducible artifact
+  bundle. The Stage-2 guest path is a separate SPTM mapping interface; the
+  note explicitly reports no bypass and supplies no connection to the
+  A15/23A355 GPU UAT producer.
+
+The local `23A355` A15 extraction also contains `has-virtualization=1` in the
+device tree, the SPTM guest-entry/exit strings, and named Stage-2 frame types
+`0x1f/0x20`. SPTM reads the property at `0xfffffff0270c3a74` and stores the
+gate at `0xfffffff027085820`. Those Stage-2 types are absent from the UAT leaf
+allow set, confirming that the hypervisor note describes a parallel SPTM API,
+not the missing link in the AGX/UAT chain.
+
+Exact guest-surface anchors are `0xfffffff0270d9d68` (Stage-2 root
+acquisition), `0xfffffff0270d9efc` (guest enter), `0xfffffff0270da1b8`
+(guest exit), `0xfffffff0270dadfc` (guest dispatch), and
+`0xfffffff0270db164` (guest VA-to-IPA). The UAT-policy rows for types
+`0x1f/0x20` both have zero allowed-domain bitmap and zero maximum mapping
+class. This is strong negative evidence for treating Hypervisor availability
+as a UAT authorization shortcut, while leaving implementation bugs as a
+separate, unproven research hypothesis.
+
+Dataflow Forensics' public `SPTM - The Last Bits` post independently places UAT
+at dispatch table `7` and describes the `0x70000000#` call family. Its iOS 17
+round-two post also records UAT as subsystem `7` with 13 services. These are
+useful corroborating labels, not evidence of a bypass.
+
+Sources reviewed:
+
+- https://arxiv.org/abs/2510.09272
+- https://tin-z.github.io/ios-exploit-starterpack/en/sptm-txm/
+- https://github.com/cloverfield11/ios26-hypervisor-research
+- https://df-f.com/blog/sptm4
+- https://df-f.com/blog/ios-17round2

@@ -29,6 +29,8 @@ not treated as the source of truth.
   `23A355` GFX PatchBay PPL-shared base to its direct firmware consumer.
 - Recovered the protected UAT map-continuation frame checks and per-type
   mapping-policy lookup on `23A355`.
+- Recovered the exact `21B91` predecessor despite its older symbol/API shape,
+  and compared its direct frame-type switch with the `23A355` table policy.
 
 ### Confirmed Findings
 
@@ -101,6 +103,21 @@ not treated as the source of truth.
     handoff but not the command packet; the local `RTBuddy64` fileset contains
     only two trampolines. The demonstrated relation is architectural, not a
     direct packet transfer.
+16. Exact `21B91` uses `iommu_frame_acquire` at `0xfffffff0070882a8`, not
+    `iommu_frame_acquire_type`. Its `sptm_uat_map_continue` at
+    `0xfffffff00706fd5c` page-masks the leaf address with
+    `0xfffffffff000` and calls `iommu_register_mapping` at
+    `0xfffffff00706ff30` with legacy mode `0` or `1`.
+17. The `21B91` registrar at `0xfffffff007088760` reads the actual frame type
+    from metadata `+0x2` and has accepting branches only for
+    `XNU_DEFAULT (0xb)` and `XNU_IO (0x19)`. This is a direct switch, not the
+    authenticated per-domain/per-class table used by `23A355`.
+18. The `21B91` request function at `0xfffffff0070703b4` saves the same five
+    input registers as the iOS 26 producer and tail-calls map continuation at
+    `0xfffffff007070484`. Its copy helper at `0xfffffff00706f68c` validates
+    the segment-descriptor page as `XNU_DEFAULT (0xb)`. The structural
+    producer role is therefore symmetric even though the protected policy
+    generation changed.
 
 ### Route Consequence
 
@@ -314,23 +331,35 @@ the remaining ambiguity around the restricted policy rows:
 The route no longer has an undefined gap between the GFX handoff and command
 construction. More importantly, the apparent `0x22/0x23` AGX branch was a
 false lead: domain 7 permission belongs to the CPU-trace/UAT integration, not
-to unidentified GPU leaf frames. The remaining authorization question is now
-the producer and retype provenance of the actual UAT page-table and leaf
-frames, beginning with `XNU_IOMMU (0x17)` and the `XNU_IO`/
-`XNU_PROTECTED_IO` distinction. A new IPA is not justified until that offline
-analysis yields one exact, bounded runtime value to observe.
+to unidentified GPU leaf frames. The direct producer is now identified as
+`acquire_uat_segments_page`. It acquires the descriptor page as
+`XNU_DEFAULT (0x0b)`, copies validated segment records, and forwards
+`num_segments` plus `map_options` to `sptm_uat_map_continue`.
+
+On `23A355`, the leaf path masks the physical address with
+`0xfffffffff000` and derives a requested mapping class of `1` or `2`. The
+domain-7 table permits
+`XNU_IO (0x19)` for both classes but does not permit
+`XNU_PROTECTED_IO (0x1a)`. This corrects the earlier open-ended
+`XNU_IO`/`XNU_PROTECTED_IO` branch. Exact `21B91` instead uses a direct
+`XNU_DEFAULT`/`XNU_IO` allow switch and legacy modes `0/1`; those values must
+not be relabeled as iOS 26 classes `1/2`. A new IPA is not justified until
+offline segment provenance identifies which permitted leaf type is actually
+used by the legitimate AGX path.
 
 ### Exact Next Task
 
-1. Trace the direct request producer's page-table and leaf-frame inputs,
-   starting from required type `0x17` (`XNU_IOMMU`).
-2. Determine whether legitimate AGX leaf mappings use `XNU_IO (0x19)`,
-   `XNU_PROTECTED_IO (0x1a)`, or a dynamically registered GFX frame type.
-3. Acquire an exact `21B91` GFX image only if byte-exact queue comparison is
+1. Trace the segment physical-address provenance from
+   `acquire_uat_segments_page` into the leaf registration call.
+2. Decode the `map_options` lookup completely and associate each legitimate
+   AGX segment kind with mapping class `1` or `2`.
+3. Trace the exact legacy mode `0/1` branch meaning on `21B91` and compare its
+   reference-accounting side effects with the iOS 26 class table.
+4. Acquire an exact `21B91` GFX image only if byte-exact queue comparison is
    still needed; the nearest iOS 17 images already match the queue contract.
-4. Keep the zero weak UPPL table as a separate branch unless a direct writer,
+5. Keep the zero weak UPPL table as a separate branch unless a direct writer,
    relocation, fixup, or protected producer is recovered.
-5. Keep this phase offline; do not emit or send a live UPPL/SPTM mapping
+6. Keep this phase offline; do not emit or send a live UPPL/SPTM mapping
    request.
 
 ### HackTricks Orientation Review
@@ -354,9 +383,67 @@ does not change the current route:
    and replace PPL on A15 or later. Therefore HackTricks is retained as an
    orientation source, not as evidence of an A15/iOS 26 bypass.
 
+### arXiv and Public-Source Cross-Check
+
+The 2025 paper *Modern iOS Security Features -- A Deep Dive into SPTM, TXM,
+and Exclaves* independently supports the descriptor-and-rule-set model used by
+the analyzer. Its main static sample is an iPhone 16 on iOS 18.4, with dynamic
+work on an SRD running iOS 18.5 and an M4 iPad on iPadOS 17.5.1. It is not an
+A15/23A355 offset source.
+
+Useful symmetric facts from the paper are:
+
+1. SPTM is the sole authority for frame retyping and mapping policy.
+2. `XNU_DEFAULT -> XNU_IOMMU` and `XNU_IOMMU -> XNU_DEFAULT` are explicit
+   lifecycle transitions in its iOS 18.4 baseline.
+3. The iOS 18.4 frame table leaves `0x22/0x23` reserved, while the recovered
+   23A355 table names those slots as the two CPU-trace buffer types. This is a
+   concrete version delta and a warning against carrying numeric types across
+   releases without the authenticated name table.
+4. The paper's normal CPU `sptm_map_page` rule set is not the proprietary UAT
+   `iommu_register_mapping` policy recovered here. The two must remain
+   separate in the report.
+
+The Tin-Z starter pack is retained only as an introductory diagram. It uses
+generic page-type names, models GXF as ordinary EL2, and says there is no
+public iOS 17 SPTM bypass; that state claim conflicts with the published Titan
+range. It contributes no build-specific UAT selector, frame type, or callback.
+
+The `cloverfield11/ios26-hypervisor-research` repository documents a separate
+Stage-2 virtualization route on A16/iOS 26.4.1. It currently contains a README
+and two commits, not a reproducible artifact bundle. Its Stage-2 frame types
+are useful as another example of SPTM-gated mapping policy, but the repository
+explicitly reports no bypass and does not connect guest VM dispatch to the
+23A355 UAT/GPU path.
+
+The local A15/23A355 artifacts independently confirm that this Stage-2 route
+is present on the current target too. `devicetree.raw` contains
+`has-virtualization` at file offset `0x36bf8`, with a four-byte value
+`01 00 00 00`. SPTM reads that property through the xref at
+`0xfffffff0270c3a74` and stores the resulting flag at
+`0xfffffff027085820`; the same image names frame types `0x1f` and `0x20` as
+`XNU_STAGE2_ROOT_TABLE` and `XNU_STAGE2_PAGE_TABLE`. Neither type appears in
+the recovered UAT leaf allow set, so this confirms a separate SPTM service,
+not an alternate UAT permission or a bypass.
+
+The separation is visible in code as well: the exact image anchors guest
+root acquisition at `0xfffffff0270d9d68`, guest entry at
+`0xfffffff0270d9efc`, guest exit at `0xfffffff0270da1b8`, guest dispatch at
+`0xfffffff0270dadfc`, and guest VA-to-IPA translation at
+`0xfffffff0270db164`. The UAT policy rows for Stage-2 types `0x1f/0x20` have
+zero allowed-domain bitmap and zero maximum mapping class. A bug in this VM
+surface would be a separate vulnerability hypothesis; static availability
+and an entitlement gate alone do not produce a host Stage-1 write primitive.
+
+Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
+identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
+`0x70000000#` family. Its earlier iOS 17 round-two post records UAT as subsystem
+`7` with 13 services. This corroborates the analyzer's independent dispatch
+attribution, but neither post publishes a Stage-2 or UAT bypass.
+
 ### Verification
 
-- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 39 tests
+- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 44 tests
   passed.
 - In-memory `compile()` check for `analyze_agx_uppl_producer.py`,
   `analyze_titan.py`, `analyze_sptm_txm.py`, and
@@ -378,6 +465,6 @@ does not change the current route:
 | `sptm-txm-static-report-v10.md` | `80E58C6FFB4CAA83A8B427FA07F4A94B2304B2391F9BB5EF7DF42805458E4AEE` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.md` | `5D6DADB165E0B4B7AF39B77BCEBC05B41193F28478BF14673986BCCA793005D4` |
-| `agx-uppl-producer/agx-uppl-producer.json` | `538B165B9F1E684B06F501EEAEBEFD17E7F4398D7FE6AFAB6DCFDBC93B852210` |
-| `agx-uppl-producer/agx-uppl-producer.md` | `5123D530B7C7E81BAF89C1D27F4117ADFB2AE06088EC3A74216EF625FB0CC2C3` |
+| `agx-uppl-producer/agx-uppl-producer.json` | `4271063015FF6793C708B6DBEF261040F415F3FBAB47603258BF22BC4253A864` |
+| `agx-uppl-producer/agx-uppl-producer.md` | `B4A83640CC775655C7BCE446BBF2730A3DCF44C9505577727FF1BDABFEAD9C1B` |
 

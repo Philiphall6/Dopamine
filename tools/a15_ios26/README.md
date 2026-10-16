@@ -26,12 +26,19 @@ handoff paths with the iOS 26 GFX image. It decodes PatchBay records, checks
 Mach-O symbol and relocation metadata for the UPPL state, and distinguishes a
 weak zero default from a demonstrated producer. It also reconstructs the
 shared SPTM/GFX handoff, dynamic GFX segment registration, and the downstream
-UAT frame-type/domain/mapping-policy checks. The v5 report additionally traces
+UAT frame-type/domain/mapping-policy checks. The v7 report additionally traces
 the local GXF command-`0x10` constructor back to RTKit bootstrap and internal
 memory-map producers, decodes the 65-entry handoff flush queue, and correlates
 restricted policy bitmaps with named IOMMU domains. It also recovers the SPTM
 frame-type name table and classifies each policy row's authenticated retype-in
-and retype-out callbacks. It performs no live protected-component request.
+and retype-out callbacks. The direct protected producer is identified as
+`acquire_uat_segments_page`; the report records its input bindings, the UAT
+leaf page mask, requested mapping classes `1/2`, and per-class frame-type
+candidates for named UAT domain 7. It also recognizes the exact iOS 17
+predecessor's untyped acquisition API, tail-call producer, direct
+`XNU_DEFAULT`/`XNU_IO` allow switch, and legacy registration modes without
+mislabeling those modes as iOS 26 mapping classes. It performs no live
+protected-component request.
 
 `analyze_vtable_fields.py` decodes authenticated chained vtable entries in an
 offline kernelcache and reports accesses to selected object-field offsets.

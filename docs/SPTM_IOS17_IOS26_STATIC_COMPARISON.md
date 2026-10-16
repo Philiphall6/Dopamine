@@ -495,9 +495,41 @@ The callback shapes support that classification. Type `0x22` uses no-op
 retype-in/out stubs. Type `0x23` uses a retype-in callback that conditionally
 clears frame metadata `+0x4` for old type `0x11`, plus the function anchored by
 `xnu_generic_retype_out` on exit. Type `0x3b` again uses no-op callbacks. The
-next symmetric comparison must instead follow the required `XNU_IOMMU`
-page-table type `0x17` and establish whether leaf pages are `XNU_IO (0x19)`,
-`XNU_PROTECTED_IO (0x1a)`, or a dynamically registered GFX type.
+next symmetric comparison follows the required `XNU_IOMMU` page-table type
+`0x17` through `acquire_uat_segments_page`. On 23A355, the leaf physical
+address is masked to a page boundary and registered with mapping class `1` or
+`2`. Domain 7 permits `XNU_IO (0x19)` with maximum class 2 but excludes
+`XNU_PROTECTED_IO (0x1a)`. The remaining comparison is the provenance of each
+segment and the exact `map_options` class selection.
+
+That exact `21B91` comparison is now complete for the protected UAT leaf
+contract. The older image uses `iommu_frame_acquire` at
+`0xfffffff0070882a8`; `sptm_uat_map_continue` at `0xfffffff00706fd5c`
+page-masks the leaf address and calls `iommu_register_mapping` at
+`0xfffffff00706ff30`. The second argument is a legacy `0/1` registration mode,
+not an iOS 26 mapping class. The registrar at `0xfffffff007088760` reads the
+actual type at metadata `+0x2` and has accepting equality branches only for
+`XNU_DEFAULT (0xb)` and `XNU_IO (0x19)`. The request function at
+`0xfffffff0070703b4` tail-calls map continuation after copying segment
+descriptors; its helper validates their page as `XNU_DEFAULT`.
+
+By contrast, `23A355` names the primitive `iommu_frame_acquire_type`, uses
+wildcard selector `0x42` to read the actual type, and consults a `0x60`-byte
+per-type table with domain bitmap and maximum mapping class. The leaf path
+requests class `1` or `2`; domain 7 permits `XNU_IO` for both but excludes
+`XNU_PROTECTED_IO`. This is a concrete policy-generation change, not evidence
+that either version's checks can be skipped.
+
+The arXiv iOS 18.4 baseline provides an important version-control check:
+`XNU_DEFAULT <-> XNU_IOMMU` transitions are present there, but slots
+`0x22/0x23` are reserved rather than the CPU-trace types named by 23A355.
+Numeric frame-type IDs must therefore be resolved from each build's own name
+table. Public Stage-2 virtualization notes for A16/iOS 26.4.1 describe a
+separate guest-page-table policy and are not evidence for the UAT leaf route.
+The A15/23A355 device tree also sets `has-virtualization=1`, and its SPTM image
+contains `XNU_STAGE2_ROOT_TABLE (0x1f)` and `XNU_STAGE2_PAGE_TABLE (0x20)`.
+Those types do not occur in the UAT leaf allow set, preserving that separation
+on the exact target.
 
 | v10 artifact | SHA-256 |
 |---|---|
@@ -513,6 +545,11 @@ page-table type `0x17` and establish whether leaf pages are `XNU_IO (0x19)`,
 - https://support.apple.com/en-ca/guide/security/sec8b776536b/web
 - https://projectzero.google/2020/07/the-core-of-apple-is-ppl-breaking-xnu.html
 - https://hacktricks.wiki/fr/binary-exploitation/ios-exploiting/index.html
+- https://arxiv.org/abs/2510.09272
+- https://tin-z.github.io/ios-exploit-starterpack/en/sptm-txm/
+- https://github.com/cloverfield11/ios26-hypervisor-research
+- https://df-f.com/blog/sptm4
+- https://df-f.com/blog/ios-17round2
 - https://github.com/alfiecg24/Titan
 - https://github.com/alfiecg24/libgrabkernel2
 - https://github.com/alfiecg24/XPF
