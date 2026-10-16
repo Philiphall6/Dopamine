@@ -462,6 +462,43 @@ The GFX firmware's command-`0x10` constructor is independently recovered at
 packet layout links that command to SPTM endpoints 4/5. The two routes share
 UAT/handoff architecture but remain distinct interfaces in the static graph.
 
+The reverse caller pass now closes the producer side of that route. In GFX
+slice `a000`, constructor `0xffffff80000339f8` is called only by serialized
+wrapper `0xffffff8000035334`. Its direct producers are
+`__rtk_arm_start_bootstrap_area`, at `0xffffff80000344f8` and
+`0xffffff800003450c` immediately before `TTBR0_EL1/TCR_EL1/SCTLR_EL1` setup,
+and an internal memory-map path at `0xffffff800003d44c`. Slice `b000` repeats
+the same structure at shifted addresses. No exact data pointer or directly
+named message/endpoint ingress was found, so the observed command is a local
+firmware mapping API rather than proof of an SPTM request translation.
+
+The GFX side also makes the shared 65-record layout concrete. Context IDs
+`0..0x40` select `handoff + 0x20 + id*0x18`; each record carries state at
+`+0x0` and two payload words at `+0x8/+0x10`.
+`__rtk_mmu_uat_flush_request` consumes the queue, while idle/wake set and
+clear owner byte `+0x638`. This separates queue/lifecycle state from SPTM's
+per-frame authorization.
+
+Both slices of each available earlier GFX image from `21D61` through
+`22B5045g` reproduce that 65-record contract and owner byte. These are not an
+exact `21B91` GFX sample, so the comparison is version-near rather than fully
+symmetric, but the queue layout is not new to `23A355`.
+
+Correlating the mapping policy with the authenticated frame-type name table
+closes that apparent branch. Type `0x22` is `XNU_CPUTRACE_PA_BUFFER` and type
+`0x23` is `XNU_CPUTRACE_VA_BUFFER`; their domain-7 permission is therefore a
+CPU-trace/UAT integration path, not evidence that either type carries AGX
+leaf mappings. Type `0x3b` is `TXM_SEP_SECURE_CHANNEL`, matching its SART-side
+policy rather than the immediate UAT/GPU route.
+
+The callback shapes support that classification. Type `0x22` uses no-op
+retype-in/out stubs. Type `0x23` uses a retype-in callback that conditionally
+clears frame metadata `+0x4` for old type `0x11`, plus the function anchored by
+`xnu_generic_retype_out` on exit. Type `0x3b` again uses no-op callbacks. The
+next symmetric comparison must instead follow the required `XNU_IOMMU`
+page-table type `0x17` and establish whether leaf pages are `XNU_IO (0x19)`,
+`XNU_PROTECTED_IO (0x1a)`, or a dynamically registered GFX type.
+
 | v10 artifact | SHA-256 |
 |---|---|
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
@@ -473,6 +510,9 @@ UAT/handoff architecture but remain distinct interfaces in the static graph.
 
 - https://newosxbook.com/bonus/sptm2.html
 - https://proteas.github.io/ios/2023/06/09/some-quick-and-discrete-notes-on-sptm.html
+- https://support.apple.com/en-ca/guide/security/sec8b776536b/web
+- https://projectzero.google/2020/07/the-core-of-apple-is-ppl-breaking-xnu.html
+- https://hacktricks.wiki/fr/binary-exploitation/ios-exploiting/index.html
 - https://github.com/alfiecg24/Titan
 - https://github.com/alfiecg24/libgrabkernel2
 - https://github.com/alfiecg24/XPF

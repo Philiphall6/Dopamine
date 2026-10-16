@@ -19,7 +19,7 @@ from collections.abc import Sequence
 
 import lief
 
-from analyze_sptm_txm import MachOImage
+from analyze_sptm_txm import MachOImage, _collect_iommu_registration_topology
 from analyze_titan import (
     MappedImage,
     disassemble_gfx_text,
@@ -66,8 +66,8 @@ def decode_patch_descriptor_bytes(raw: bytes) -> dict:
 
 
 def decode_frame_type_policy_record(raw: bytes, frame_type: int) -> dict:
-    if len(raw) < 0x18:
-        raise ValueError("frame-type policy record is shorter than 0x18 bytes")
+    if len(raw) < 0x58:
+        raise ValueError("frame-type policy record is shorter than 0x58 bytes")
     return {
         "frame_type": frame_type,
         "flags": raw[0],
@@ -75,6 +75,126 @@ def decode_frame_type_policy_record(raw: bytes, frame_type: int) -> dict:
         "state_flags": raw[2],
         "allowed_domain_bitmap": struct.unpack_from("<Q", raw, 8)[0],
         "maximum_mapping_class": raw[0x10],
+        "mapping_policy_byte_0x11": raw[0x11],
+        "retype_in_encoded": struct.unpack_from("<Q", raw, 0x48)[0],
+        "retype_out_encoded": struct.unpack_from("<Q", raw, 0x50)[0],
+    }
+
+
+def decode_domain_bitmap(bitmap: int, names: dict[int, str]) -> list[dict]:
+    return [
+        {"id": domain, "name": names.get(domain)}
+        for domain in range(64)
+        if bitmap & (1 << domain)
+    ]
+
+
+def collect_frame_type_names(image: MachOImage, count: int = 0x40) -> dict:
+    anchors = image.find_string("SPTM_UNTYPED")
+    if not anchors:
+        return {"status": "NOT_FOUND", "table": None, "entries": []}
+    target = anchors[0]
+    for section in image.binary.sections:
+        content = bytes(section.content)
+        section_address = int(section.virtual_address)
+        for offset in range(0, len(content) - 7, 8):
+            encoded = struct.unpack_from("<Q", content, offset)[0]
+            if image.resolve_chained_pointer(encoded) != target:
+                continue
+            table = section_address + offset
+            entries = []
+            for frame_type in range(count):
+                name_address = image.resolve_chained_pointer(
+                    image.read_u64(table + frame_type * 8)
+                )
+                entries.append(
+                    {
+                        "frame_type": frame_type,
+                        "name": (
+                            image.read_cstring(name_address)
+                            if name_address is not None
+                            else None
+                        ),
+                    }
+                )
+            names = {entry["frame_type"]: entry["name"] for entry in entries}
+            if names.get(0) == "SPTM_UNTYPED" and names.get(0xB) == "XNU_DEFAULT":
+                return {
+                    "status": "FRAME_TYPE_NAME_TABLE_CONFIRMED",
+                    "table": table,
+                    "entries": entries,
+                }
+    return {"status": "NOT_FOUND", "table": None, "entries": []}
+
+
+def classify_retype_callback(instructions: Sequence) -> str:
+    body = [
+        instruction
+        for instruction in instructions
+        if instruction.mnemonic not in {"bti", "nop"}
+    ]
+    if body and body[0].mnemonic in {"ret", "retab"}:
+        return "NO_OP"
+
+    has_type_read = any(
+        instruction.mnemonic == "ldrb" and instruction.op_str == "w8, [x0, #2]"
+        for instruction in body
+    )
+    has_type_0x11_compare = any(
+        instruction.mnemonic == "cmp" and instruction.op_str == "w8, #0x11"
+        for instruction in body
+    )
+    has_metadata_clear = any(
+        instruction.mnemonic == "strh" and instruction.op_str == "wzr, [x0, #4]"
+        for instruction in body
+    )
+    if has_type_read and has_type_0x11_compare and has_metadata_clear:
+        return "TYPE_0X11_METADATA_CLEAR"
+    return "NONTRIVIAL"
+
+
+def _retype_callback_body(image: MachOImage, address: int, limit: int = 16) -> list:
+    index = image._instruction_index.get(address)
+    if index is None:
+        return []
+    body = []
+    for instruction in image.instructions[index : index + limit]:
+        body.append(instruction)
+        if instruction.mnemonic in {"ret", "retab"}:
+            break
+    return body
+
+
+def _retype_callback_names(image: MachOImage) -> dict[int, str]:
+    names: dict[int, str] = {}
+    for entry in image.referenced_strings(r"retype_(?:in|out)"):
+        for reference in entry["references"]:
+            function = image.function_start(reference["address"])
+            if function is not None:
+                names.setdefault(function, entry["value"])
+    return names
+
+
+def decode_retype_callback(
+    image: MachOImage, encoded: int, names: dict[int, str]
+) -> dict:
+    address = image.resolve_chained_pointer(encoded)
+    if address is None:
+        return {"encoded": encoded, "address": None, "behavior": "UNRESOLVED"}
+    body = _retype_callback_body(image, address)
+    return {
+        "encoded": encoded,
+        "address": address,
+        "name": names.get(address),
+        "behavior": classify_retype_callback(body),
+        "preview": [
+            {
+                "address": instruction.address,
+                "mnemonic": instruction.mnemonic,
+                "op_str": instruction.op_str,
+            }
+            for instruction in body
+        ],
     }
 
 
@@ -214,6 +334,351 @@ def _branch_target(instruction) -> int | None:
     ):
         return None
     return parse_immediate_operand(instruction.op_str)
+
+
+def _gfx_branch_target(instruction: dict) -> int | None:
+    if instruction["mnemonic"] not in {"b", "bl"}:
+        return None
+    return parse_immediate_operand(instruction["op_str"])
+
+
+def _gfx_function_start(instructions: Sequence[dict], index: int) -> int | None:
+    """Recover a bounded GFX function start from its PAC prologue."""
+    for candidate_index in range(index, max(-1, index - 4096), -1):
+        candidate = instructions[candidate_index]
+        if candidate["mnemonic"] in {"pacibsp", "paciasp"}:
+            return candidate["address"]
+    return None
+
+
+def _gfx_function_body(
+    instructions: Sequence[dict], start: int, limit: int = 4096
+) -> list[dict]:
+    index = next(
+        (i for i, instruction in enumerate(instructions) if instruction["address"] == start),
+        None,
+    )
+    if index is None:
+        return []
+    body = []
+    for instruction in instructions[index : index + limit]:
+        if (
+            instruction["address"] != start
+            and instruction["mnemonic"] in {"pacibsp", "paciasp"}
+        ):
+            break
+        body.append(instruction)
+        if instruction["mnemonic"] in {"ret", "retab"}:
+            break
+    return body
+
+
+def _gfx_direct_callers(
+    instructions: Sequence[dict], target: int
+) -> list[dict]:
+    callers = []
+    for index, instruction in enumerate(instructions):
+        if _gfx_branch_target(instruction) != target:
+            continue
+        function = _gfx_function_start(instructions, index)
+        callers.append(
+            {
+                "callsite": instruction["address"],
+                "function": function,
+                "branch_kind": instruction["mnemonic"],
+            }
+        )
+    return callers
+
+
+def _gfx_exact_pointer_references(image: MappedImage, target: int) -> list[int]:
+    encoded = struct.pack("<Q", target)
+    references = []
+    for segment in image.segments:
+        start = 0
+        while True:
+            offset = segment.content.find(encoded, start)
+            if offset < 0:
+                break
+            references.append(segment.vmaddr + offset)
+            start = offset + 1
+    return references
+
+
+def _gfx_function_markers(body: Sequence[dict]) -> list[str]:
+    markers = []
+    operands = "\n".join(instruction["op_str"].lower() for instruction in body)
+    for marker, operand in (
+        ("writes_ttbr0_el1", "ttbr0_el1"),
+        ("writes_tcr_el1", "tcr_el1"),
+        ("writes_sctlr_el1", "sctlr_el1"),
+    ):
+        if operand in operands:
+            markers.append(marker)
+    return markers
+
+
+def analyze_gxf_map_producer(
+    image: MappedImage, instructions: Sequence[dict]
+) -> dict:
+    """Trace the local producer of direct GXF command 0x10.
+
+    The result records static call provenance only. It deliberately does not
+    treat the GXF packet as an SPTM endpoint request.
+    """
+    enter = image.symbols.get("__mmu_gxf_enter")
+    constructor = None
+    command_assignment = None
+    command_store = None
+    submit_wrapper = None
+
+    for index, instruction in enumerate(instructions):
+        if instruction["mnemonic"] != "mov" or instruction["op_str"] != "w8, #0x10":
+            continue
+        function = _gfx_function_start(instructions, index)
+        if function is None:
+            continue
+        body = _gfx_function_body(instructions, function, 128)
+        local_index = next(
+            (
+                i
+                for i, candidate in enumerate(body)
+                if candidate["address"] == instruction["address"]
+            ),
+            None,
+        )
+        if local_index is None:
+            continue
+        store = next(
+            (
+                candidate
+                for candidate in body[local_index + 1 : local_index + 5]
+                if candidate["mnemonic"].startswith("st")
+                and candidate["op_str"].startswith("w8, ")
+            ),
+            None,
+        )
+        call = next(
+            (
+                candidate
+                for candidate in body[local_index + 1 : local_index + 16]
+                if candidate["mnemonic"] == "bl"
+            ),
+            None,
+        )
+        if store is None or call is None:
+            continue
+        candidate_wrapper = _gfx_branch_target(call)
+        wrapper_body = (
+            _gfx_function_body(instructions, candidate_wrapper, 128)
+            if candidate_wrapper is not None
+            else []
+        )
+        if enter is None or not any(
+            _gfx_branch_target(candidate) == enter for candidate in wrapper_body
+        ):
+            continue
+        constructor = function
+        command_assignment = instruction["address"]
+        command_store = store["address"]
+        submit_wrapper = candidate_wrapper
+        break
+
+    if constructor is None:
+        return {
+            "status": "GXF_MAP_CONSTRUCTOR_NOT_FOUND",
+            "command": 0x10,
+            "constructor": None,
+        }
+
+    constructor_callers = _gfx_direct_callers(instructions, constructor)
+    serialized_wrapper = (
+        constructor_callers[0]["function"]
+        if len({item["function"] for item in constructor_callers}) == 1
+        else None
+    )
+    wrapper_callers = (
+        _gfx_direct_callers(instructions, serialized_wrapper)
+        if serialized_wrapper is not None
+        else []
+    )
+    symbols_by_address = {address: name for name, address in image.symbols.items()}
+    producer_functions = []
+    for function in sorted(
+        {item["function"] for item in wrapper_callers if item["function"] is not None}
+    ):
+        body = _gfx_function_body(instructions, function)
+        symbol = symbols_by_address.get(function)
+        markers = _gfx_function_markers(body)
+        if symbol == "__rtk_arm_start_bootstrap_area":
+            role = "rtkit_bootstrap_translation_setup"
+        elif markers:
+            role = "translation_setup"
+        else:
+            role = "internal_memory_map_path"
+        producer_functions.append(
+            {
+                "function": function,
+                "symbol": symbol,
+                "role": role,
+                "markers": markers,
+                "callsites": [
+                    item["callsite"]
+                    for item in wrapper_callers
+                    if item["function"] == function
+                ],
+            }
+        )
+
+    return {
+        "status": "GXF_MAP_LOCAL_PRODUCER_CONFIRMED",
+        "command": 0x10,
+        "constructor": constructor,
+        "command_assignment": command_assignment,
+        "command_store": command_store,
+        "submit_wrapper": submit_wrapper,
+        "gxf_enter": enter,
+        "serialized_wrapper": serialized_wrapper,
+        "constructor_callers": constructor_callers,
+        "producer_functions": producer_functions,
+        "constructor_exact_pointer_references": _gfx_exact_pointer_references(
+            image, constructor
+        ),
+        "serialized_wrapper_exact_pointer_references": (
+            _gfx_exact_pointer_references(image, serialized_wrapper)
+            if serialized_wrapper is not None
+            else []
+        ),
+        "direct_named_message_ingress_observed": any(
+            item["symbol"]
+            and any(
+                token in item["symbol"].lower()
+                for token in ("message", "endpoint", "ep_work")
+            )
+            for item in producer_functions
+        ),
+    }
+
+
+def analyze_gfx_handoff_consumers(
+    instructions: Sequence[dict], symbols: dict[str, int]
+) -> dict:
+    flush_start = symbols.get("__rtk_mmu_uat_flush_request")
+    idle_start = symbols.get("__rtk_mmu_uat_idle")
+    wake_start = symbols.get("__rtk_mmu_uat_wake")
+    if None in {flush_start, idle_start, wake_start}:
+        return {"status": "HANDOFF_CONSUMERS_NOT_FOUND"}
+
+    flush_body = _gfx_function_body(instructions, flush_start, 256)
+    idle_body = _gfx_function_body(instructions, idle_start, 128)
+    wake_body = _gfx_function_body(instructions, wake_start, 128)
+    stride_assignment = next(
+        (
+            instruction["address"]
+            for instruction in flush_body
+            if instruction["mnemonic"] == "mov"
+            and instruction["op_str"] == "w8, #0x18"
+        ),
+        None,
+    )
+    maximum_context_check = next(
+        (
+            instruction["address"]
+            for instruction in flush_body
+            if instruction["mnemonic"] == "cmp"
+            and instruction["op_str"] == "w21, #0x40"
+        ),
+        None,
+    )
+    record_access = next(
+        (
+            instruction["address"]
+            for instruction in flush_body
+            if instruction["mnemonic"] == "ldr"
+            and instruction["op_str"] == "w8, [x22, #0x20]!"
+        ),
+        None,
+    )
+    payload_loads = [
+        instruction["address"]
+        for instruction in flush_body
+        if instruction["mnemonic"] == "ldr"
+        and instruction["op_str"]
+        in {
+            "x0, [x22, #8]",
+            "x1, [x22, #0x10]",
+            "x0, [x8, #0x28]",
+            "x1, [x8, #0x30]",
+        }
+    ]
+    completion_writes = [
+        instruction["address"]
+        for instruction in flush_body
+        if instruction["mnemonic"] == "str"
+        and instruction["op_str"] in {"w8, [x22]", "w20, [x22]"}
+    ]
+    owner_flag_set = next(
+        (
+            instruction["address"]
+            for instruction in idle_body
+            if instruction["mnemonic"] == "strb"
+            and instruction["op_str"] == "w8, [x19, #0x638]"
+        ),
+        None,
+    )
+    owner_flag_clear = next(
+        (
+            instruction["address"]
+            for instruction in wake_body
+            if instruction["mnemonic"] == "strb"
+            and instruction["op_str"] == "wzr, [x19, #0x638]"
+        ),
+        None,
+    )
+    handshake_clears = [
+        instruction["address"]
+        for instruction in flush_body
+        if instruction["mnemonic"] in {"str", "strb"}
+        and instruction["op_str"] in {"wzr, [x19, #0x14]", "wzr, [x19, #0x11]"}
+    ]
+
+    confirmed = all(
+        value is not None
+        for value in (
+            stride_assignment,
+            maximum_context_check,
+            record_access,
+            owner_flag_set,
+            owner_flag_clear,
+        )
+    ) and len(payload_loads) == 2
+    return {
+        "status": (
+            "HANDOFF_65_RECORD_FLUSH_QUEUE_CONFIRMED"
+            if confirmed
+            else "HANDOFF_CONSUMERS_PARTIAL"
+        ),
+        "flush_function": flush_start,
+        "idle_function": idle_start,
+        "wake_function": wake_start,
+        "record_table_offset": 0x20,
+        "record_stride": 0x18,
+        "maximum_context_id": 0x40,
+        "record_count": 65,
+        "record_state_offset": 0,
+        "record_payload_offsets": [8, 0x10],
+        "stride_assignment": stride_assignment,
+        "maximum_context_check": maximum_context_check,
+        "record_access": record_access,
+        "payload_loads": payload_loads,
+        "completion_writes": completion_writes,
+        "handoff_busy_offset": 0x14,
+        "handoff_busy_byte_offset": 0x11,
+        "handshake_clears": handshake_clears,
+        "owner_flag_offset": 0x638,
+        "owner_flag_set": owner_flag_set,
+        "owner_flag_clear": owner_flag_clear,
+    }
 
 
 def recover_selector_type_pairs(body: Sequence) -> list[dict]:
@@ -442,12 +907,26 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
                         policy_table = page + offset
                         break
     policy_records = []
+    frame_type_names = collect_frame_type_names(image)
+    frame_name_by_type = {
+        entry["frame_type"]: entry["name"]
+        for entry in frame_type_names["entries"]
+    }
     if policy_table is not None:
+        callback_names = _retype_callback_names(image)
         for frame_type in range(0x40):
             raw = image.mapped_bytes(policy_table + frame_type * 0x60, 0x60)
             if raw is None:
                 break
-            policy_records.append(decode_frame_type_policy_record(raw, frame_type))
+            record = decode_frame_type_policy_record(raw, frame_type)
+            record["frame_type_name"] = frame_name_by_type.get(frame_type)
+            record["retype_in_callback"] = decode_retype_callback(
+                image, record.pop("retype_in_encoded"), callback_names
+            )
+            record["retype_out_callback"] = decode_retype_callback(
+                image, record.pop("retype_out_encoded"), callback_names
+            )
+            policy_records.append(record)
     allowed_policy_records = [
         record
         for record in policy_records
@@ -493,6 +972,7 @@ def analyze_sptm_uat_frame_policy(image: MachOImage) -> dict:
             "frame_type_read": policy_type_read,
             "per_type_record_stride": policy_stride,
             "descriptor_table": policy_table,
+            "frame_type_names": frame_type_names,
             "allowed_domain_bitmap_offset": 8,
             "allowed_domain_bitmap_read": domain_bitmap_read,
             "maximum_mapping_class_offset": 0x10,
@@ -723,6 +1203,18 @@ def analyze_sptm_handoff(path: pathlib.Path, label: str) -> dict:
 
     registration_contract = analyze_sptm_registration_contract(image, anchors)
     uat_frame_policy = analyze_sptm_uat_frame_policy(image)
+    iommu_topology = _collect_iommu_registration_topology(image)
+    domain_names = {
+        registration["table_id"]: descriptor["name"]
+        for descriptor in iommu_topology.get("descriptors", [])
+        for registration in descriptor.get("registrations", [])
+    }
+    mapping_policy = uat_frame_policy.get("mapping_policy", {})
+    for record in mapping_policy.get("allowed_frame_types", []):
+        record["allowed_domains"] = decode_domain_bitmap(
+            record["allowed_domain_bitmap"], domain_names
+        )
+    mapping_policy["known_iommu_domains"] = domain_names
     return {
         "label": label,
         "path": str(path),
@@ -813,6 +1305,10 @@ def analyze_gfx_uppl(path: pathlib.Path) -> dict:
     slices = []
     for image in parse_gfx_images(path):
         instructions = disassemble_gfx_text(image)
+        gxf_map_producer = analyze_gxf_map_producer(image, instructions)
+        handoff_consumers = analyze_gfx_handoff_consumers(
+            instructions, image.symbols
+        )
         descriptors = [
             decode_patch_descriptor(image, name)
             for name in sorted(image.symbols)
@@ -1002,6 +1498,8 @@ def analyze_gfx_uppl(path: pathlib.Path) -> dict:
                         else "REVIEW_REQUIRED"
                     ),
                 },
+                "gxf_map_producer": gxf_map_producer,
+                "handoff_consumers": handoff_consumers,
                 "producer_status": (
                     "ZERO_WEAK_DEFAULT_NO_PRODUCER_OBSERVED"
                     if state_bytes == bytes(16)
@@ -1040,7 +1538,7 @@ def build_report(args) -> dict:
         )
     }
     return {
-        "schema": "a15-agx-uppl-producer-v3",
+        "schema": "a15-agx-uppl-producer-v5",
         "scope": "offline-static-only",
         "agx_firmware_providers": providers,
         "sptm_handoffs": handoffs,
@@ -1067,7 +1565,16 @@ def build_report(args) -> dict:
                 "one or more GFX data segments in its protected-frame registry. The UAT "
                 "consumer still enforces page-table frame type 0x17. Mapping "
                 "registration uses wildcard selector 0x42, then reads the actual frame "
-                "type and applies per-type domain/mapping policy."
+                "type and applies per-type domain/mapping policy. In the GFX image, "
+                "direct command 0x10 is now traced to a local serialized wrapper. "
+                "Its proven producers are RTKit bootstrap translation setup and an "
+                "internal memory-map path; no direct named RTKit message ingress is "
+                "observed in that call chain. The SPTM name table identifies restricted "
+                "types 0x22/0x23 as XNU_CPUTRACE_PA_BUFFER and "
+                "XNU_CPUTRACE_VA_BUFFER; their domain-7 permission is a CPU-trace/UAT "
+                "route, not an unidentified AGX leaf type. Type 0x3b is "
+                "TXM_SEP_SECURE_CHANNEL and is likewise unrelated to the immediate "
+                "AGX mapping path."
             ),
             "limitation": (
                 "Static evidence does not show that the exact A15 payload ever replaces "
@@ -1176,6 +1683,32 @@ def render_markdown(report: dict) -> str:
                 f"frame types with a nonzero domain bitmap or mapping class: "
                 f"`{allowed_types}`."
             )
+            for record in mapping_policy.get("allowed_frame_types", []):
+                bitmap = record["allowed_domain_bitmap"]
+                if bitmap in {0, (1 << 64) - 1}:
+                    continue
+                domains = ", ".join(
+                    f"{domain['id']} ({domain['name'] or 'unknown'})"
+                    for domain in record.get("allowed_domains", [])
+                )
+                lines.append(
+                    f"  Restricted type `0x{record['frame_type']:x}` "
+                    f"(`{record.get('frame_type_name') or 'unknown'}`): bitmap "
+                    f"`0x{bitmap:x}` -> domains `{domains}`."
+                )
+                callback_text = []
+                for direction in ("in", "out"):
+                    callback = record.get(f"retype_{direction}_callback", {})
+                    address = callback.get("address")
+                    label = callback.get("name") or callback.get("behavior", "unknown")
+                    callback_text.append(
+                        f"{direction}={label}@"
+                        f"{'-' if address is None else f'0x{address:x}'}"
+                    )
+                lines.append(
+                    "  Retype callbacks: `" + ", ".join(callback_text) + "`; "
+                    f"policy byte `+0x11=0x{record['mapping_policy_byte_0x11']:x}`."
+                )
         for producer in policy.get("map_request_producers", []):
             descriptor_types = [
                 call.get("requested_type")
@@ -1241,6 +1774,53 @@ def render_markdown(report: dict) -> str:
             f"context guard read="
             f"`{'-' if shared['context_guard_read'] is None else f'0x{shared['context_guard_read']:x}'}`."
         )
+        consumers = item["handoff_consumers"]
+        if consumers.get("record_count") is not None:
+            lines.append(
+                "Handoff queue: "
+                f"**{consumers['status']}**; `{consumers['record_count']}` records at "
+                f"`+0x{consumers['record_table_offset']:x}`, stride "
+                f"`0x{consumers['record_stride']:x}`, context IDs "
+                f"`0..0x{consumers['maximum_context_id']:x}`, state `+0x0`, payload "
+                f"`+0x8/+0x10`; flush `0x{consumers['flush_function']:x}`, idle "
+                f"`0x{consumers['idle_function']:x}`, wake "
+                f"`0x{consumers['wake_function']:x}`."
+            )
+        gxf = item["gxf_map_producer"]
+        if gxf.get("constructor") is not None:
+            lines.extend(
+                [
+                    "",
+                    "Direct GXF map producer: "
+                    f"**{gxf['status']}**; command `0x{gxf['command']:x}`, "
+                    f"constructor `0x{gxf['constructor']:x}`, serialized wrapper "
+                    f"`0x{gxf['serialized_wrapper']:x}`, submit wrapper "
+                    f"`0x{gxf['submit_wrapper']:x}`, GXF enter "
+                    f"`0x{gxf['gxf_enter']:x}`.",
+                    "",
+                    "| Producer function | Symbol | Role | Callsites | Markers |",
+                    "|---:|---|---|---|---|",
+                ]
+            )
+            for producer in gxf["producer_functions"]:
+                symbol = producer["symbol"] or "-"
+                callsites = ", ".join(
+                    f"0x{address:x}" for address in producer["callsites"]
+                )
+                markers = ", ".join(producer["markers"]) or "-"
+                lines.append(
+                    f"| `0x{producer['function']:x}` | `{symbol}` | "
+                    f"`{producer['role']}` | `{callsites}` | `{markers}` |"
+                )
+            lines.extend(
+                [
+                    "",
+                    "This is a local firmware call chain. No direct named RTKit "
+                    "message/endpoint ingress or exact data pointer to the constructor "
+                    "was observed, so it is not evidence that command `0x10` is a "
+                    "translated SPTM UAT endpoint-4/5 request.",
+                ]
+            )
 
     conclusion = report["conclusion"]
     lines.extend(

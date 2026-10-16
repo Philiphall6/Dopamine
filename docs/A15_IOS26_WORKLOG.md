@@ -250,31 +250,117 @@ it has no direct `sptm_*` anchor, but its role as the request producer is now
 established by its direct call to endpoint 5 rather than inferred from table
 order.
 
+## 2026-10-16: GXF Producer and Handoff Queue Provenance
+
+### Completed
+
+- Extended `analyze_agx_uppl_producer.py` to recover the direct GXF map
+  constructor, its serialized caller, first-order producer functions, exact
+  pointer references, and the handoff queue consumer contract.
+- Correlated restricted frame-policy bitmaps with the named IOMMU descriptor
+  IDs recovered from the same SPTM image.
+- Regenerated the v5 AGX/UPPL producer report for both packaged GFX slices.
+
+### Confirmed Findings
+
+1. In slice `a000`, direct GXF map command `0x10` is constructed at
+   `0xffffff80000339f8`, submitted through `0xffffff80000338a0`, and enters
+   GXF through `__mmu_gxf_enter` at `0xffffff80000009c0`.
+2. The constructor has one direct caller, the serialized wrapper at
+   `0xffffff8000035334`. That wrapper is called twice by
+   `__rtk_arm_start_bootstrap_area` at `0xffffff80000344f8` and
+   `0xffffff800003450c`, immediately before the firmware installs its
+   `TTBR0_EL1`, `TCR_EL1`, and `SCTLR_EL1` configuration. A second caller at
+   `0xffffff800003d44c` belongs to an internal memory-map path.
+3. The same structural route is independently present in slice `b000` with
+   shifted addresses. Neither slice contains an exact data pointer to the
+   constructor or a direct named RTKit message/endpoint ingress in this call
+   chain. This is a local firmware mapping API, not evidence of a translated
+   SPTM endpoint-4/5 packet.
+4. The shared handoff is an explicit 65-entry flush queue. Context IDs are
+   bounded to `0..0x40`; records start at `+0x20`, use stride `0x18`, and hold
+   state at `+0x0` plus two payload values at `+0x8/+0x10`.
+5. `__rtk_mmu_uat_flush_request` consumes and acknowledges those records.
+   `__rtk_mmu_uat_idle` sets owner byte `+0x638`; `__rtk_mmu_uat_wake`
+   clears it. The owner byte is therefore lifecycle state, not a frame type or
+   an SPTM authorization result.
+6. `XNU_CPUTRACE_PA_BUFFER (0x22)` and `XNU_CPUTRACE_VA_BUFFER (0x23)` use
+   domain bitmap `0x84`, permitting domains 2 and 7. Domain 7 is the named
+   `uat` IOMMU descriptor. `TXM_SEP_SECURE_CHANNEL (0x3b)` uses bitmap
+   `0x120`, permitting domain 5 (`SART`) and unresolved domain 8. These are
+   CPU-trace and SEP integration policies, not AGX leaf candidates.
+7. The same 65-record queue contract and `+0x638` idle/wake owner byte are
+   confirmed in both slices of every available comparison GFX image from
+   `21D61` through `22B5045g`. This is not an exact `21B91` GFX comparison,
+   but it rules out the queue layout itself as the iOS 26-specific delta.
+
+### Frame-Type Names and Retype Callbacks
+
+The authenticated SPTM frame-type name table at `0xfffffff027019228` removes
+the remaining ambiguity around the restricted policy rows:
+
+1. `0x22` is `XNU_CPUTRACE_PA_BUFFER`. Its retype-in and retype-out callbacks
+   are both no-op `BTI c; RET` stubs.
+2. `0x23` is `XNU_CPUTRACE_VA_BUFFER`. Its retype-in callback conditionally
+   clears the halfword at frame metadata `+0x4` when the old type is `0x11`;
+   its retype-out callback is the function anchored by
+   `xnu_generic_retype_out`.
+3. `0x3b` is `TXM_SEP_SECURE_CHANNEL`. Its callbacks are no-op stubs.
+4. The table also identifies `0x17` as `XNU_IOMMU`, `0x19` as `XNU_IO`, and
+   `0x1a` as `XNU_PROTECTED_IO`.
+
+### Consequence
+
+The route no longer has an undefined gap between the GFX handoff and command
+construction. More importantly, the apparent `0x22/0x23` AGX branch was a
+false lead: domain 7 permission belongs to the CPU-trace/UAT integration, not
+to unidentified GPU leaf frames. The remaining authorization question is now
+the producer and retype provenance of the actual UAT page-table and leaf
+frames, beginning with `XNU_IOMMU (0x17)` and the `XNU_IO`/
+`XNU_PROTECTED_IO` distinction. A new IPA is not justified until that offline
+analysis yields one exact, bounded runtime value to observe.
+
 ### Exact Next Task
 
-1. Recover callers and ownership for GFX firmware function
-   `0xffffff80000339f8`, then identify the kernel/RTKit message that reaches
-   it without assuming it is an SPTM endpoint call.
-2. Assign owners/roles to the policy-allowed frame types, especially the
-   domain-limited types `0x22`, `0x23`, and `0x3b`, using direct producers.
-3. Map every reader and writer of the 65 handoff records and the `+0x638`
-   guard, then compare those paths symmetrically with `21B91`.
+1. Trace the direct request producer's page-table and leaf-frame inputs,
+   starting from required type `0x17` (`XNU_IOMMU`).
+2. Determine whether legitimate AGX leaf mappings use `XNU_IO (0x19)`,
+   `XNU_PROTECTED_IO (0x1a)`, or a dynamically registered GFX frame type.
+3. Acquire an exact `21B91` GFX image only if byte-exact queue comparison is
+   still needed; the nearest iOS 17 images already match the queue contract.
 4. Keep the zero weak UPPL table as a separate branch unless a direct writer,
    relocation, fixup, or protected producer is recovered.
 5. Keep this phase offline; do not emit or send a live UPPL/SPTM mapping
    request.
 
+### HackTricks Orientation Review
+
+The HackTricks iOS exploitation index is useful as a broad checklist, but it
+does not change the current route:
+
+1. Its physical-UAF/IOSurface material concerns obtaining kernel read/write.
+   The current chain has already crossed that stage with ClearSword, so it
+   does not answer the remaining SPTM frame-policy question.
+2. Its PPL stale-TLB example describes an older PPL-specific vulnerability.
+   It is not evidence that the same invalidation or accounting flaw exists in
+   the higher-privilege SPTM boundary on `23A355`.
+3. Its BinDiff workflow supports versioned kernelcache comparison, but our
+   symmetric method must also include `sptm`, `txm`, and GFX firmware. A
+   kernel-only diff would miss the exact frame-name, retype-callback, and UAT
+   policy evidence recovered here.
+4. The page contains broad mitigation summaries and approximate timelines,
+   not build-specific proof. Apple confirms the architectural boundary:
+   SPTM and TXM protect user and kernel page tables even against kernel write,
+   and replace PPL on A15 or later. Therefore HackTricks is retained as an
+   orientation source, not as evidence of an A15/iOS 26 bypass.
+
 ### Verification
 
-- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 33 tests
+- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 39 tests
   passed.
-- `python -m py_compile tools/a15_ios26/analyze_agx_uppl_producer.py
-  tools/a15_ios26/analyze_titan.py
-  tools/a15_ios26/compare_gfx_security.py
-  tools/a15_ios26/test_analyze_agx_uppl_producer.py
-  tools/a15_ios26/test_analyze_titan.py
-  tools/a15_ios26/analyze_sptm_txm.py
-  tools/a15_ios26/test_analyze_sptm_txm.py`: passed.
+- In-memory `compile()` check for `analyze_agx_uppl_producer.py`,
+  `analyze_titan.py`, `analyze_sptm_txm.py`, and
+  `check_research_integration.py`: passed.
 - `python tools/a15_ios26/check_research_integration.py`: passed; the active
   diagnostic remains exact-target and privilege/bootstrap stages stay blocked.
 - `git diff --check`: passed (line-ending warnings only).
@@ -292,4 +378,6 @@ order.
 | `sptm-txm-static-report-v10.md` | `80E58C6FFB4CAA83A8B427FA07F4A94B2304B2391F9BB5EF7DF42805458E4AEE` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.md` | `5D6DADB165E0B4B7AF39B77BCEBC05B41193F28478BF14673986BCCA793005D4` |
+| `agx-uppl-producer/agx-uppl-producer.json` | `538B165B9F1E684B06F501EEAEBEFD17E7F4398D7FE6AFAB6DCFDBC93B852210` |
+| `agx-uppl-producer/agx-uppl-producer.md` | `5123D530B7C7E81BAF89C1D27F4117ADFB2AE06088EC3A74216EF625FB0CC2C3` |
 

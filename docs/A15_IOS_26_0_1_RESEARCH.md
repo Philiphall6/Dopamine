@@ -1307,3 +1307,34 @@ On iPhone14,2 with A15 and iOS 26.0.1, Dopamine presents this target as a
 research target and routes it only to the bounded active Titan probe. General
 support still returns false. This policy is checked by
 `tools/a15_ios26/check_research_integration.py`.
+
+## Offline GXF Producer Update
+
+The direct GXF map route is no longer producer-unknown. For slice `a000`,
+command constructor `0xffffff80000339f8` is called through serialized wrapper
+`0xffffff8000035334`. Two calls originate in
+`__rtk_arm_start_bootstrap_area` immediately before the firmware installs
+`TTBR0_EL1`, `TCR_EL1`, and `SCTLR_EL1`; a third originates in an internal
+memory-map path. Slice `b000` repeats the same structure. No exact pointer or
+direct named message/endpoint ingress connects this local API to SPTM UAT
+endpoint 4 or 5.
+
+The shared handoff's 65 records are a firmware flush queue: context IDs
+`0..0x40`, base `+0x20`, stride `0x18`, state `+0x0`, payload
+`+0x8/+0x10`. Idle and wake independently set and clear owner byte `+0x638`.
+This is lifecycle synchronization, not an SPTM policy decision.
+
+The authenticated frame-type name table and policy callbacks remove the
+remaining ambiguity around those rows. Type `0x22` is
+`XNU_CPUTRACE_PA_BUFFER` and has no-op retype callbacks. Type `0x23` is
+`XNU_CPUTRACE_VA_BUFFER`; its retype-in callback clears metadata `+0x4` when
+the old type is `0x11`, and its retype-out callback is
+`xnu_generic_retype_out`. Type `0x3b` is `TXM_SEP_SECURE_CHANNEL` and also has
+no-op callbacks. Their domain permissions therefore describe CPU-trace/UAT
+and SEP/SART integration, not unidentified AGX leaf types.
+
+The remaining protected boundary is concentrated on the real mapping input:
+the UAT page-table requirement `XNU_IOMMU (0x17)` and the leaf-frame
+provenance, especially `XNU_IO (0x19)`, `XNU_PROTECTED_IO (0x1a)`, or a
+dynamically registered GFX type. That offline distinction comes before any
+further on-device probe.
