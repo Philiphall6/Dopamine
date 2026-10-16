@@ -82,6 +82,7 @@ def main() -> int:
         (ROOT / "tools/a15_ios26/live-layout-iphone14_2-23A355.json").read_text()
     )
     report = (ROOT / "docs/A15_IOS_26_0_1_RESEARCH.md").read_text()
+    ipc_copy_audit = (ROOT / "docs/TITAN_IPC_COPY_DARWIN25_AUDIT.md").read_text()
 
     for marker in (
         "CPUFAMILY_ARM_BLIZZARD_AVALANCHE",
@@ -254,9 +255,27 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_PROFILE_V5_BUILT" in report,
-        "report does not record the IPC profile v5 build state",
+        "ACTIVE_TITAN_PROBE_IPC_PROFILE_V5_DEVICE_PASS" in report,
+        "report does not record the IPC profile v5 device-pass state",
     )
+    for marker in (
+        "valid=0x7f",
+        "0xffffffdf5e4e4600",
+        "0xffffffdf5e4e4800",
+        "0xffffffe431bdc000",
+        "distinct devices, namespaces,",
+    ):
+        require(marker in report, f"report is missing IPC profile v5 device evidence: {marker}")
+    for marker in (
+        "xnu-10002.41.9",
+        "xnu-12377.1.9",
+        "ip_kobject + 0x10",
+        "ip_pdrequest",
+        "ip_nsrequest",
+        "field-specific pointer authentication",
+        "must keep the unconditional stop before",
+    ):
+        require(marker in ipc_copy_audit, f"Darwin 25 IPC copy audit is missing: {marker}")
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
     for marker in ("kalloc.type.var2.16", "elements+0x8", "clearsword_kreadbuf_exact"):

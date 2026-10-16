@@ -523,7 +523,26 @@ confirmed the `PROFILE`, `PROFILE-COMPARE`, profile counters, v5 revision, and
 explicit pre-copy stop. The resulting
 `Dopamine-A15-iOS26-ipc-profile-v5-bfd9c4f.ipa` is 55,474,513 bytes with
 SHA-256 `97C911785BAD3E78417AAFF8EA3E4B62528CE53A008ECC89B9D6F536356E96E9`.
-Device confirmation is pending.
+The exact target ran v5 on 2026-10-16 without rebooting. Both exact matches
+produced complete `valid=0x7f` profiles. Index `537` used device
+`0xffffffdf5e4e4600`, namespace `0xffffffe20f7794c0`, and handles
+`0xffffffe042a2a000`; index `1009` used device `0xffffffdf5e4e4800`,
+namespace `0xffffffe20f77a4c0`, and handles `0xffffffe042a18000`. Both clients
+shared GPU `0xffffffe431bdc000`, device vtable `0xfffffff04b379c50`, and GPU
+vtable `0xfffffff04b3760d0`; both MDSID-map fields were null. The final
+`PROFILE-COMPARE` therefore reported `same-device=no`, `same-gpu=yes`,
+`same-gpu-vtable=yes`, `same-namespace=no`, and `same-handles=no`. The scan
+covered all 2,048 entries with no unstable snapshot and stopped before
+`task_copy_ipc_entry`. The USB capture
+`ipc-profile-v5-usb-2026-10-16.log` has SHA-256
+`0C91FC6ABB960F3ABEBA005FD479E41A0F60A2BAD45A97431DA1AF7F9279FD3C`.
+The subsequent source-only audit against Apple XNU tags `xnu-10002.41.9` and
+`xnu-12377.1.9` is in `docs/TITAN_IPC_COPY_DARWIN25_AUDIT.md`. It proves that
+the historical `ip_kobject + 0x10` no-senders handoff now lands in
+`ip_pdrequest`, while XNU 12377 reads the authenticated `ip_nsrequest` union at
+`ip_kobject`. The old `ipc_object` bit operations are also incompatible with
+Darwin 25's typed/state header and signed label pointer. The active copy path
+remains blocked.
 
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the

@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_PROFILE_V5_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_PROFILE_V5_DEVICE_PASS`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 The durable offline-analysis handoff is
@@ -307,7 +307,7 @@ IOKit connections, two exact matches, `match-logged=2`, and
 `match-truncated=0`. The table and PID remained stable, and execution again
 stopped before IPC right copy.
 
-## IPC Profile v5 Build
+## IPC Profile v5 Device Result
 
 The v5 build follows only the two exact v4 matches. For each one it performs
 seven exact, read-only field reads: the `IOGPUDevice` pointer and vtable,
@@ -316,7 +316,34 @@ pointer. A final `PROFILE-COMPARE` record reports whether the two clients share
 those downstream objects. The integration checker separately scans this helper
 for kernel writes, IPC-right copying, Mach operations, and IOKit method calls;
 all remain absent. The unconditional stop before `task_copy_ipc_entry` is still
-packaged. Device confirmation of these profiles is pending.
+packaged.
+
+The exact target ran v5 on 2026-10-16 without rebooting. Both exact user-client
+matches produced complete profiles (`valid=0x7f`). Index `537` resolved through
+device `0xffffffdf5e4e4600`, GPU `0xffffffe431bdc000`, namespace
+`0xffffffe20f7794c0`, and handles `0xffffffe042a2a000`. Index `1009` resolved
+through device `0xffffffdf5e4e4800`, the same GPU
+`0xffffffe431bdc000`, namespace `0xffffffe20f77a4c0`, and handles
+`0xffffffe042a18000`. Both devices used vtable `0xfffffff04b379c50`;
+both reached GPU vtable `0xfffffff04b3760d0`; both nullable MDSID-map fields
+were zero. `PROFILE-COMPARE` therefore reported distinct devices, namespaces,
+and handle tables, but a shared GPU backend and GPU vtable. This preserves the
+association between each IPC port and its own client namespace while proving
+that both clients terminate at the same IOGPU object.
+
+The final census remained stable across all 2,048 entries and reported two
+complete profiles, no unstable entry, and stable table and PID checks. It
+stopped at the explicit read-only boundary before IPC entry copy. The captured
+USB log is `ipc-profile-v5-usb-2026-10-16.log`, SHA-256
+`0C91FC6ABB960F3ABEBA005FD479E41A0F60A2BAD45A97431DA1AF7F9279FD3C`.
+
+The follow-up offline audit is recorded in
+`docs/TITAN_IPC_COPY_DARWIN25_AUDIT.md`. It finds a deterministic XNU 12377
+contract break in the historical right-copy route: `ipc_object` grew from 8 to
+16 bytes, old flag bits changed meaning, `ip_kobject + 0x10` now selects
+`ip_pdrequest` instead of `ip_nsrequest`, and the destination pointer field is
+authenticated with a different discriminator. The exact-target stop therefore
+remains mandatory.
 
 ## End-to-End Chain Status
 
@@ -330,7 +357,7 @@ packaged. Device confirmation of these profiles is pending.
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
 | Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
-| Titan unrestricted physical write | **NOT REACHED / IPC CENSUS V4 DEVICE PASS; PROFILE V5 BUILT** | v4 identified exact IOGPU user-client objects at indices 537 and 1009; packaged v5 compares their read-only downstream device graphs while IPC entry copy and GFX submission remain blocked |
+| Titan unrestricted physical write | **NOT REACHED / IPC PROFILE V5 DEVICE PASS** | v5 completely profiled exact clients 537 and 1009: distinct device/namespace/handle objects share one IOGPU backend; IPC entry copy and GFX submission remain blocked |
 | SPTM/PAPT and Stage-2 contract | **NO SHORTCUT / TYPED STAGE-2 CONTRACT MAPPED** | Table 0 and the `0x1f/0x20` lifecycle are statically resolved, but they add protected frame, VMID, and state-transition gates and do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |
