@@ -2,8 +2,10 @@
 
 Target: iPhone14,2, iOS 26.0.1, build 23A355. USB identity was confirmed
 through usbmux before the user launched Dopamine. The installed app's
-SequenceNumber changed from 21184 to 21200. The user supplied the in-app
-console output for the run tagged `self-gpu-client-v1+rtkit-mmio-disabled-v1`.
+SequenceNumber changed from 21184 to 21200. The run tagged
+`self-gpu-client-v1+rtkit-mmio-disabled-v1` has ID
+`26BE4B78-1AB1-43CF-B8BF-857159C02766`; the user supplied the in-app
+console output and the persistent JSONL was retrieved over USB.
 
 ## Observed result
 
@@ -22,9 +24,13 @@ console output for the run tagged `self-gpu-client-v1+rtkit-mmio-disabled-v1`.
   arbitrary kernel write. No physical write or protected-memory modification
   is evidenced.
 - Dopamine remained running after the stop. The classic USB syslog relay did
-  not expose the `A15ACTIVE` console lines, so the supplied in-app output is
-  the evidence for the failing checkpoint. Direct House Arrest access to the
-  app container returned `InstallationLookupFailed`.
+  not expose the `A15ACTIVE` console lines. House Arrest in Documents-only
+  mode returned `InstallationLookupFailed`, but full-container mode retrieved
+  `Documents/a15-ios26-active-probe.jsonl` over USB. The copy is at
+  `outputs/self-gpu-client-0fc8dec/device-probe-v1.jsonl`; it contains 36
+  checkpoints for this run. The detailed `table-contract` line is in the
+  user-supplied console output, while the JSONL independently records the
+  baseline enumeration failure and subsequent stop and cleanup.
 
 ## Correction and falsifiable next test
 
