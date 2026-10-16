@@ -606,6 +606,17 @@ sysctls. It then records an explicit read-only stop without invoking any
 route's real boundary at framework visibility, entitlement, or kernel support
 without changing Titan's IPC and protected-write boundaries.
 
+Commit `dfe6098` was built successfully by GitHub Actions run `38895885958`.
+The packaged executable contains the revision, checkpoint, entitlement,
+sysctl, and resolved-symbol markers. Its embedded XML entitlements were parsed
+directly from the Mach-O code-signature superblob (slot 5); none of the three
+Hypervisor entitlement keys is granted. The stable local artifact is
+`outputs/iphone-system/Dopamine-A15-iOS26-hypervisor-preflight-v1-dfe6098.ipa`
+(55,477,131 bytes, SHA-256
+`098214EF81C2F2CC1D139F2AAAEB4E36CFE959AC73BC6A3AB90EE3734EECEBE0`).
+This confirms that a device result will measure the ordinary app's actual
+boundary rather than a signing-time entitlement supplied for the experiment.
+
 ### Verification
 
 - `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests

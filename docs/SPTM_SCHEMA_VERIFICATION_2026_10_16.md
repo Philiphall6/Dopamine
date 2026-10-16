@@ -146,3 +146,12 @@ This preflight does not claim that the final case exists, and it deliberately
 does not test `hv_vm_create`. It gives the Stage-2 branch a measurable first
 edge while preserving the active probe's no-VM, no-right-transfer, and
 no-protected-write boundary.
+
+The branch was compiled in GitHub Actions run `38895885958` from commit
+`dfe6098`. Package inspection confirmed all preflight markers in the executable
+and parsed the embedded XML entitlement blob from its Mach-O signature. The
+signature grants no `com.apple.private.hypervisor`,
+`com.apple.private.hypervisor.vmapple`, or
+`com.apple.security.hypervisor` entitlement. The device probe can therefore
+distinguish a genuinely exposed framework/sysctl edge from a private
+entitlement path that was added by the test build itself.
