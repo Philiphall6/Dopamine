@@ -95,6 +95,14 @@ python tools/a15_ios26/build_response_trace.py \
   --markdown-output response-trace.md
 ```
 
+The producer comparison's v8 schema also records a bounded Stage-2 surface.
+It locates the `has-virtualization` boolean, its static readers, the named guest
+functions and authenticated pointer slots, the GENTER target-to-service switch,
+and the dispatch-state transitions. It reads the `XNU_STAGE2_ROOT_TABLE` and
+`XNU_STAGE2_PAGE_TABLE` policy rows directly and reports whether either is
+eligible for the named UAT domain. This remains offline evidence only: it does
+not issue GENTER, invoke a protected handler, or construct a guest payload.
+
 `build_response_trace.py` combines the existing reports and an optional device
 diagnostic into an ordered, provenance-aware v2 trace. It separates the first
 metadata blocker from the first runtime blocker and deliberately labels the

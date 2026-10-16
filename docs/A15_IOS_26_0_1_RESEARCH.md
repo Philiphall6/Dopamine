@@ -1393,6 +1393,17 @@ class. This is strong negative evidence for treating Hypervisor availability
 as a UAT authorization shortcut, while leaving implementation bugs as a
 separate, unproven research hypothesis.
 
+The bounded v8 extraction also resolves the gate consumers and GENTER state
+transitions. `has-virtualization` is stored as a boolean at
+`0xfffffff027085820`; its three readers are `cpu_root_table_retype_in`,
+`genter_dispatch_entry`, and `sptm_surt_alloc`. The low-level branch at
+`0xfffffff02708caac` reaches the dispatcher. Target `0x1b` selects internal
+service `0xc` for `STATE_XNU -> STATE_XNU_GUEST`, while target `0x1c` selects
+service `0xd` for `STATE_XNU_GUEST -> STATE_SPTM_CALLED_BY_XNU`. Both use
+handler `0xfffffff02708c23c`. These are private guest-context transitions;
+they neither change the zero UAT policy rows for `0x1f/0x20` nor supply a
+Stage-1 physical-write primitive.
+
 Dataflow Forensics' public `SPTM - The Last Bits` post independently places UAT
 at dispatch table `7` and describes the `0x70000000#` call family. Its iOS 17
 round-two post also records UAT as subsystem `7` with 13 services. These are

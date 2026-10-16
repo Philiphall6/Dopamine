@@ -531,6 +531,16 @@ contains `XNU_STAGE2_ROOT_TABLE (0x1f)` and `XNU_STAGE2_PAGE_TABLE (0x20)`.
 Those types do not occur in the UAT leaf allow set, preserving that separation
 on the exact target.
 
+The exact-build v8 extractor makes the asymmetry explicit. `21B91` contains no
+`has-virtualization`, guest, Stage-2, or VMID anchor in its SPTM image.
+`23A355` stores the device-tree result at `0xfffffff027085820` and reads it
+only from root-table retyping, GENTER dispatch, and SURT allocation. GENTER
+target `0x1b` selects service `0xc` for `STATE_XNU -> STATE_XNU_GUEST`; target
+`0x1c` selects service `0xd` for `STATE_XNU_GUEST ->
+STATE_SPTM_CALLED_BY_XNU`. The dedicated guest state machine therefore exists
+only on the newer sample, while its two frame-policy rows remain outside every
+IOMMU-domain mapping class recovered for UAT.
+
 | v10 artifact | SHA-256 |
 |---|---|
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |

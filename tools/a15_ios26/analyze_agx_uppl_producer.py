@@ -1033,6 +1033,391 @@ def summarize_domain_mapping_policy(
     }
 
 
+def recover_genter_dispatch_routes(instructions: Sequence) -> list[dict]:
+    """Recover the bounded guest-enter target-to-service switch."""
+
+    routes = []
+    for index, instruction in enumerate(instructions):
+        if instruction.mnemonic != "cmp":
+            continue
+        parts = [part.strip().lower() for part in instruction.op_str.split(",")]
+        if len(parts) != 2 or parts[0] != "w8":
+            continue
+        dispatch_target = parse_immediate_operand(parts[1])
+        if dispatch_target not in {0x1B, 0x1C}:
+            continue
+        for candidate in instructions[index + 1 : index + 5]:
+            candidate_parts = [
+                part.strip().lower() for part in candidate.op_str.split(",")
+            ]
+            if (
+                candidate.mnemonic == "mov"
+                and len(candidate_parts) == 2
+                and candidate_parts[0] == "w8"
+            ):
+                service = parse_immediate_operand(candidate_parts[1])
+                if service is not None:
+                    routes.append(
+                        {
+                            "dispatch_target": dispatch_target,
+                            "service_index": service,
+                            "target_compare": instruction.address,
+                            "service_assignment": candidate.address,
+                        }
+                    )
+                break
+    return routes
+
+
+def _collect_chained_pointer_slots(image: MachOImage, target: int) -> list[dict]:
+    slots = []
+    for section in image.binary.sections:
+        content = bytes(section.content)
+        section_address = int(section.virtual_address)
+        for offset in range(0, len(content) - 7, 8):
+            encoded = struct.unpack_from("<Q", content, offset)[0]
+            if image.resolve_chained_pointer(encoded) != target:
+                continue
+            slots.append(
+                {
+                    "address": section_address + offset,
+                    "section": section.name,
+                    "encoded": encoded,
+                }
+            )
+    return slots
+
+
+def _collect_dispatch_state_names(image: MachOImage, count: int = 0x17) -> dict:
+    anchors = image.find_string("STATE_SPTM_BOOTSTRAP")
+    if not anchors:
+        return {"status": "NOT_FOUND", "table": None, "entries": []}
+    target = anchors[0]
+    for section in image.binary.sections:
+        content = bytes(section.content)
+        section_address = int(section.virtual_address)
+        for offset in range(0, len(content) - count * 8 + 1, 8):
+            encoded = struct.unpack_from("<Q", content, offset)[0]
+            if image.resolve_chained_pointer(encoded) != target:
+                continue
+            table = section_address + offset
+            entries = []
+            for state_id in range(count):
+                name_address = image.resolve_chained_pointer(
+                    image.read_u64(table + state_id * 8)
+                )
+                entries.append(
+                    {
+                        "id": state_id,
+                        "name": (
+                            image.read_cstring(name_address)
+                            if name_address is not None
+                            else None
+                        ),
+                    }
+                )
+            names = {entry["id"]: entry["name"] for entry in entries}
+            if names.get(5) == "STATE_XNU" and names.get(6) == "STATE_XNU_GUEST":
+                return {
+                    "status": "DISPATCH_STATE_NAMES_CONFIRMED",
+                    "table": table,
+                    "entries": entries,
+                }
+    return {"status": "NOT_FOUND", "table": None, "entries": []}
+
+
+def _function_from_exact_anchor(image: MachOImage, value: str) -> int | None:
+    function, _ = _function_from_string_anchor(image, rf"^{re.escape(value)}$")
+    return function
+
+
+def analyze_sptm_stage2_surface(
+    image: MachOImage, uat_frame_policy: dict
+) -> dict:
+    """Describe the bounded Stage-2 surface without invoking protected code."""
+
+    virtualization_anchors = image.referenced_strings(r"^has-virtualization$")
+    guest_names = (
+        "acquire_stage2_root_pt",
+        "sptm_guest_enter",
+        "sptm_guest_exit",
+        "sptm_guest_dispatch",
+        "sptm_guest_va_to_ipa",
+    )
+    guest_functions = {
+        name: _function_from_exact_anchor(image, name) for name in guest_names
+    }
+    if not virtualization_anchors and not any(guest_functions.values()):
+        return {
+            "status": "NOT_FOUND",
+            "has_virtualization_property": False,
+            "guest_functions": {},
+            "frame_policy_rows": [],
+        }
+
+    references_by_instruction = {
+        reference.address: reference for reference in image._references
+    }
+    property_reference = None
+    property_value_load = None
+    boolean_store = None
+    virtualization_flag = None
+    if virtualization_anchors and virtualization_anchors[0]["references"]:
+        property_reference = virtualization_anchors[0]["references"][0]["address"]
+        index = image._instruction_index.get(property_reference)
+        if index is not None:
+            for instruction in image.instructions[index : index + 20]:
+                if instruction.mnemonic == "ldr" and instruction.op_str == "w8, [x8]":
+                    property_value_load = instruction.address
+                if instruction.mnemonic != "strb":
+                    continue
+                reference = references_by_instruction.get(instruction.address)
+                if reference is not None:
+                    boolean_store = instruction.address
+                    virtualization_flag = reference.target
+                    break
+
+    gate_roles = (
+        "cpu_root_table_retype_in",
+        "genter_dispatch_entry",
+        "sptm_surt_alloc",
+    )
+    role_functions = {
+        role: _function_from_exact_anchor(image, role) for role in gate_roles
+    }
+    gate_readers = []
+    if virtualization_flag is not None:
+        roles_by_function = {
+            function: role
+            for role, function in role_functions.items()
+            if function is not None
+        }
+        for reference in image.references_to(virtualization_flag):
+            instruction = image.instruction_at(reference.address)
+            if instruction is None or not instruction.mnemonic.startswith("ldr"):
+                continue
+            function = image.function_start(reference.address)
+            gate_readers.append(
+                {
+                    "address": reference.address,
+                    "function": function,
+                    "role": roles_by_function.get(function),
+                    "instruction": (
+                        f"{instruction.mnemonic} {instruction.op_str}".strip()
+                    ),
+                }
+            )
+
+    function_records = {}
+    for name, function in guest_functions.items():
+        if function is None:
+            continue
+        direct_calls = image.calls_to(function)
+        direct_call_set = set(direct_calls)
+        function_records[name] = {
+            "function": function,
+            "direct_calls": direct_calls,
+            "direct_branches": [
+                address
+                for address in image.branches_to(function)
+                if address not in direct_call_set
+            ],
+            "pointer_slots": _collect_chained_pointer_slots(image, function),
+        }
+
+    genter_function = role_functions.get("genter_dispatch_entry")
+    genter_body = (
+        _function_body(image, genter_function, 512)
+        if genter_function is not None
+        else []
+    )
+    genter_routes = recover_genter_dispatch_routes(genter_body)
+    dispatch_function = None
+    for index, instruction in enumerate(genter_body[:-1]):
+        if instruction.mnemonic != "adr" or not instruction.op_str.startswith("x30,"):
+            continue
+        candidate = genter_body[index + 1]
+        if candidate.mnemonic == "b":
+            dispatch_function = _branch_target(candidate)
+            if dispatch_function is not None:
+                break
+
+    state_names = _collect_dispatch_state_names(image)
+    state_name_by_id = {
+        entry["id"]: entry["name"] for entry in state_names.get("entries", [])
+    }
+    dispatch_table = None
+    state_stride = None
+    service_stride = None
+    domain_count = None
+    service_count = None
+    dispatch_transitions = []
+    if dispatch_function is not None:
+        dispatch_body = _function_body(image, dispatch_function, 512)
+        dispatch_addresses = {instruction.address for instruction in dispatch_body}
+        const_candidates = []
+        for reference in image._references:
+            if reference.address not in dispatch_addresses:
+                continue
+            instruction = image.instruction_at(reference.address)
+            if (
+                instruction is not None
+                and instruction.mnemonic == "add"
+                and instruction.op_str.startswith("x9, x9,")
+                and image.mapped_bytes(reference.target, 0x20) is not None
+            ):
+                const_candidates.append((reference.address, reference.target))
+        if const_candidates:
+            dispatch_table = sorted(const_candidates)[0][1]
+        if any(
+            instruction.mnemonic == "lsl" and instruction.op_str == "x8, x0, #9"
+            for instruction in dispatch_body
+        ) and any(
+            instruction.mnemonic == "sub"
+            and instruction.op_str == "x8, x8, x0, lsl #5"
+            for instruction in dispatch_body
+        ):
+            state_stride = 0x1E0
+        if any(
+            instruction.mnemonic == "ubfiz"
+            and instruction.op_str == "x8, x21, #5, #0x20"
+            for instruction in dispatch_body
+        ):
+            service_stride = 0x20
+        for instruction in dispatch_body:
+            if instruction.mnemonic != "cmp":
+                continue
+            if instruction.op_str == "x0, #0x17":
+                domain_count = 0x17
+            elif instruction.op_str == "w21, #0xf":
+                service_count = 0xF
+
+    if all(
+        value is not None
+        for value in (dispatch_table, state_stride, service_stride, domain_count)
+    ):
+        for route in genter_routes:
+            service = route["service_index"]
+            for origin_domain in range(domain_count):
+                entry = (
+                    dispatch_table
+                    + origin_domain * state_stride
+                    + service * service_stride
+                )
+                raw_handler = image.read_u64(entry + 8)
+                handler = image.resolve_chained_pointer(raw_handler)
+                if handler is None:
+                    continue
+                target_domain_raw = image.mapped_bytes(entry, 1)
+                callable_raw = image.mapped_bytes(entry + 0x10, 1)
+                target_domain = target_domain_raw[0] if target_domain_raw else None
+                dispatch_transitions.append(
+                    {
+                        **route,
+                        "entry": entry,
+                        "origin_domain_id": origin_domain,
+                        "origin_domain": state_name_by_id.get(origin_domain),
+                        "target_domain_id": target_domain,
+                        "target_domain": state_name_by_id.get(target_domain),
+                        "handler": handler,
+                        "callable": callable_raw[0] if callable_raw else None,
+                        "flags": image.read_u64(entry + 0x18),
+                    }
+                )
+
+    mapping_policy = uat_frame_policy.get("mapping_policy", {})
+    policy_table = mapping_policy.get("descriptor_table")
+    frame_names = {
+        entry["frame_type"]: entry["name"]
+        for entry in mapping_policy.get("frame_type_names", {}).get("entries", [])
+    }
+    known_domains = mapping_policy.get("known_iommu_domains", {})
+    uat_domain_id = next(
+        (domain_id for domain_id, name in known_domains.items() if name == "uat"),
+        None,
+    )
+    callback_names = _retype_callback_names(image)
+    frame_policy_rows = []
+    if policy_table is not None:
+        for frame_type in (0x1F, 0x20):
+            raw = image.mapped_bytes(policy_table + frame_type * 0x60, 0x60)
+            if raw is None:
+                continue
+            record = decode_frame_type_policy_record(raw, frame_type)
+            retype_in = decode_retype_callback(
+                image, record.pop("retype_in_encoded"), callback_names
+            )
+            retype_out = decode_retype_callback(
+                image, record.pop("retype_out_encoded"), callback_names
+            )
+            record.update(
+                {
+                    "frame_type_name": frame_names.get(frame_type),
+                    "retype_in_callback": {
+                        key: retype_in.get(key)
+                        for key in ("address", "name", "behavior")
+                    },
+                    "retype_out_callback": {
+                        key: retype_out.get(key)
+                        for key in ("address", "name", "behavior")
+                    },
+                    "direct_uat_mapping_allowed": bool(
+                        uat_domain_id is not None
+                        and record["allowed_domain_bitmap"] & (1 << uat_domain_id)
+                        and record["maximum_mapping_class"] > 0
+                    ),
+                }
+            )
+            frame_policy_rows.append(record)
+
+    return {
+        "status": (
+            "STAGE2_SURFACE_PRESENT_SEPARATE_FROM_UAT"
+            if virtualization_flag is not None
+            and len(function_records) == len(guest_names)
+            and dispatch_transitions
+            and frame_policy_rows
+            and not any(
+                row["direct_uat_mapping_allowed"] for row in frame_policy_rows
+            )
+            else "PARTIAL"
+        ),
+        "has_virtualization_property": bool(virtualization_anchors),
+        "virtualization_gate": {
+            "property_reference": property_reference,
+            "property_value_load": property_value_load,
+            "boolean_store": boolean_store,
+            "flag": virtualization_flag,
+            "readers": gate_readers,
+        },
+        "guest_functions": function_records,
+        "genter_dispatch": {
+            "function": genter_function,
+            "low_level_branches": (
+                image.branches_to(genter_function)
+                if genter_function is not None
+                else []
+            ),
+            "routes": genter_routes,
+            "universal_dispatcher": dispatch_function,
+            "table": dispatch_table,
+            "state_stride": state_stride,
+            "service_stride": service_stride,
+            "domain_count": domain_count,
+            "service_count": service_count,
+            "state_names": state_names,
+            "transitions": dispatch_transitions,
+        },
+        "frame_policy_rows": frame_policy_rows,
+        "uat_separation": {
+            "uat_domain_id": uat_domain_id,
+            "stage2_frame_types_direct_uat_mapping_allowed": any(
+                row["direct_uat_mapping_allowed"] for row in frame_policy_rows
+            ),
+        },
+    }
+
+
 def _function_from_string_anchor(
     image: MachOImage, pattern: str
 ) -> tuple[int | None, list[dict]]:
@@ -1614,6 +1999,7 @@ def analyze_sptm_handoff(path: pathlib.Path, label: str) -> dict:
             ),
             frame_type_names,
         )
+    stage2_surface = analyze_sptm_stage2_surface(image, uat_frame_policy)
     return {
         "label": label,
         "path": str(path),
@@ -1641,6 +2027,7 @@ def analyze_sptm_handoff(path: pathlib.Path, label: str) -> dict:
         ),
         "registration_contract": registration_contract,
         "uat_frame_policy": uat_frame_policy,
+        "stage2_surface": stage2_surface,
     }
 
 
@@ -1937,7 +2324,7 @@ def build_report(args) -> dict:
         )
     }
     return {
-        "schema": "a15-agx-uppl-producer-v7",
+        "schema": "a15-agx-uppl-producer-v8",
         "scope": "offline-static-only",
         "agx_firmware_providers": providers,
         "sptm_handoffs": handoffs,
@@ -1958,6 +2345,7 @@ def build_report(args) -> dict:
             "stage2_frame_types_direct_uat_mapping_allowed": bool(
                 {0x1F, 0x20} & ios26_allowed_types
             ),
+            "stage2_surface_status": handoffs[1]["stage2_surface"]["status"],
             "route": (
                 "The legacy AGX firmware-provider method is no longer usable. PatchBay "
                 "supplies GPTBAT/PPL-shared addresses and the PPL-shared base feeds the "
@@ -1984,7 +2372,11 @@ def build_report(args) -> dict:
                 "The exact iOS 17 predecessor uses the untyped iommu_frame_acquire "
                 "API and a direct two-type allow switch for XNU_DEFAULT/XNU_IO with "
                 "registration modes 0/1; iOS 26 replaces that switch with typed "
-                "acquisition plus domain/class policy."
+                "acquisition plus domain/class policy. The iOS 26 Stage-2 surface is "
+                "separate: has-virtualization gates root retyping, SURT allocation, "
+                "and GENTER dispatch; GENTER targets 0x1b/0x1c select services 0xc/0xd "
+                "for the XNU/guest state transitions. Stage-2 frame types retain "
+                "dedicated lifecycle callbacks but have no direct UAT mapping policy."
             ),
             "limitation": (
                 "Static evidence does not show that the exact A15 payload ever replaces "
@@ -1996,6 +2388,9 @@ def build_report(args) -> dict:
 
 
 def render_markdown(report: dict) -> str:
+    def format_address(value: int | None) -> str:
+        return "-" if value is None else f"0x{value:x}"
+
     lines = [
         "# A15 AGX / SPTM / UPPL Producer Comparison",
         "",
@@ -2213,6 +2608,78 @@ def render_markdown(report: dict) -> str:
             "argument is structurally distinct from the `1/2` class argument on",
             "`23A355`. This is the concrete version transition; it is not evidence",
             "that either policy can be bypassed.",
+            "",
+            "### Bounded Stage-2 surface",
+            "",
+            "| Build | Status | Device-tree gate | Guest functions | Direct UAT mapping |",
+            "|---|---|---:|---:|---:|",
+        ]
+    )
+    for item in report["sptm_handoffs"]:
+        stage2 = item["stage2_surface"]
+        lines.append(
+            f"| {item['label']} | `{stage2['status']}` | "
+            f"{stage2.get('has_virtualization_property', False)} | "
+            f"{len(stage2.get('guest_functions', {}))} | "
+            f"{stage2.get('uat_separation', {}).get('stage2_frame_types_direct_uat_mapping_allowed')} |"
+        )
+        if stage2["status"] == "NOT_FOUND":
+            continue
+        gate = stage2["virtualization_gate"]
+        lines.append(
+            f"  `{item['label']}` gate: property reference "
+            f"`{format_address(gate['property_reference'])}`, value load "
+            f"`{format_address(gate['property_value_load'])}`, boolean store "
+            f"`{format_address(gate['boolean_store'])}` -> flag "
+            f"`{format_address(gate['flag'])}`."
+        )
+        for reader in gate["readers"]:
+            lines.append(
+                f"  Gate reader `{reader.get('role') or 'unresolved'}`: "
+                f"`0x{reader['address']:x}` in "
+                f"`{format_address(reader['function'])}`."
+            )
+        dispatch = stage2["genter_dispatch"]
+        lines.append(
+            f"  GENTER dispatcher `{format_address(dispatch['function'])}` reaches universal "
+            f"dispatcher `{format_address(dispatch['universal_dispatcher'])}`; state table "
+            f"`{format_address(dispatch['table'])}`, strides "
+            f"`{format_address(dispatch['state_stride'])}` / "
+            f"`{format_address(dispatch['service_stride'])}`."
+        )
+        for transition in dispatch["transitions"]:
+            lines.append(
+                f"  Target `0x{transition['dispatch_target']:x}` -> service "
+                f"`0x{transition['service_index']:x}`: "
+                f"`{transition['origin_domain']}` -> `{transition['target_domain']}`, "
+                f"handler `0x{transition['handler']:x}`."
+            )
+        for name, function in stage2["guest_functions"].items():
+            slots = ", ".join(
+                f"0x{slot['address']:x}" for slot in function["pointer_slots"]
+            ) or "-"
+            lines.append(
+                f"  Guest function `{name}`: `0x{function['function']:x}`; "
+                f"direct callers `{len(function['direct_calls'])}`; pointer slots "
+                f"`{slots}`."
+            )
+        for row in stage2["frame_policy_rows"]:
+            lines.append(
+                f"  Frame type `0x{row['frame_type']:x}` "
+                f"(`{row['frame_type_name']}`): domain bitmap "
+                f"`0x{row['allowed_domain_bitmap']:x}`, maximum mapping class "
+                f"`{row['maximum_mapping_class']}`, direct UAT mapping "
+                f"`{row['direct_uat_mapping_allowed']}`."
+            )
+    lines.extend(
+        [
+            "",
+            "The Stage-2 evidence is a private guest-context state machine, not a",
+            "second UAT leaf interface. The device-tree boolean gates the root-table",
+            "retype, SURT allocation, and GENTER paths. The two Stage-2 frame types",
+            "have dedicated retype callbacks but zero IOMMU-domain bitmap and zero",
+            "maximum mapping class, so this report does not identify a UAT-to-Stage-2",
+            "shortcut or a protected-memory bypass.",
             "",
             "## iOS 26 GFX PatchBay and UPPL state",
             "",

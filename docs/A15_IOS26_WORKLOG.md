@@ -435,6 +435,18 @@ zero allowed-domain bitmap and zero maximum mapping class. A bug in this VM
 surface would be a separate vulnerability hypothesis; static availability
 and an entitlement gate alone do not produce a host Stage-1 write primitive.
 
+The v8 producer report now recovers the Stage-2 gate and state machine rather
+than relying on names alone. The flag at `0xfffffff027085820` has exactly three
+static readers: `cpu_root_table_retype_in` (`0xfffffff0270c81a8`),
+`genter_dispatch_entry` (`0xfffffff0270cc4e8`), and `sptm_surt_alloc`
+(`0xfffffff0270d5558`). The low-level GENTER path branches at
+`0xfffffff02708caac` into `genter_dispatch_entry`. Dispatch target `0x1b`
+selects service `0xc` and transitions `STATE_XNU -> STATE_XNU_GUEST`; target
+`0x1c` selects service `0xd` and transitions `STATE_XNU_GUEST ->
+STATE_SPTM_CALLED_BY_XNU`. Both entries use the same state-transition handler
+at `0xfffffff02708c23c`. This bounds the guest route without identifying an
+UAT permission edge or a bypass.
+
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
 `0x70000000#` family. Its earlier iOS 17 round-two post records UAT as subsystem
@@ -443,7 +455,7 @@ attribution, but neither post publishes a Stage-2 or UAT bypass.
 
 ### Verification
 
-- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 44 tests
+- `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 46 tests
   passed.
 - In-memory `compile()` check for `analyze_agx_uppl_producer.py`,
   `analyze_titan.py`, `analyze_sptm_txm.py`, and
@@ -465,6 +477,6 @@ attribution, but neither post publishes a Stage-2 or UAT bypass.
 | `sptm-txm-static-report-v10.md` | `80E58C6FFB4CAA83A8B427FA07F4A94B2304B2391F9BB5EF7DF42805458E4AEE` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.json` | `FF4B1B8AF5819404D8271DB340A253B619612C7BFD45C6365E65BD5EF2FBCC23` |
 | `ios17_1_1-symmetric/sptm-txm-static-report-v10.md` | `5D6DADB165E0B4B7AF39B77BCEBC05B41193F28478BF14673986BCCA793005D4` |
-| `agx-uppl-producer/agx-uppl-producer.json` | `4271063015FF6793C708B6DBEF261040F415F3FBAB47603258BF22BC4253A864` |
-| `agx-uppl-producer/agx-uppl-producer.md` | `B4A83640CC775655C7BCE446BBF2730A3DCF44C9505577727FF1BDABFEAD9C1B` |
+| `agx-uppl-producer/agx-uppl-producer.json` | `30D13A4EFAD70607226FFCE771322AA3509BEFDF83DBE18E93D5D291FF3CA5A6` |
+| `agx-uppl-producer/agx-uppl-producer.md` | `4C8905BEA6C80FF210D075A2B0A998132CA40999DA387E4CC2D6DEF041F3D7F0` |
 

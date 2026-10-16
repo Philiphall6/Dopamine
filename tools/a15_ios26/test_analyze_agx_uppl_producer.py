@@ -13,6 +13,7 @@ from analyze_agx_uppl_producer import (
     decode_frame_type_policy_record,
     decode_patch_descriptor_bytes,
     recover_argument_bindings,
+    recover_genter_dispatch_routes,
     recover_legacy_register_mapping_policy,
     recover_legacy_uat_leaf_mapping_contract,
     recover_selector_type_pairs,
@@ -151,6 +152,41 @@ class StateReferenceTests(unittest.TestCase):
 
 
 class RegistrationCallTests(unittest.TestCase):
+    def test_recovers_bounded_genter_service_routes(self) -> None:
+        body = [
+            object_instruction(0x1000, "cmp", "w8, #0x1b"),
+            object_instruction(0x1004, "b.ne", "#0x1010"),
+            object_instruction(0x1008, "mov", "w8, #0xc"),
+            object_instruction(0x100C, "b", "#0x1030"),
+            object_instruction(0x1010, "cmp", "w8, #0x1c"),
+            object_instruction(0x1014, "b.ne", "#0x1020"),
+            object_instruction(0x1018, "mov", "w8, #0xd"),
+        ]
+        self.assertEqual(
+            recover_genter_dispatch_routes(body),
+            [
+                {
+                    "dispatch_target": 0x1B,
+                    "service_index": 0xC,
+                    "target_compare": 0x1000,
+                    "service_assignment": 0x1008,
+                },
+                {
+                    "dispatch_target": 0x1C,
+                    "service_index": 0xD,
+                    "target_compare": 0x1010,
+                    "service_assignment": 0x1018,
+                },
+            ],
+        )
+
+    def test_ignores_unrelated_genter_switch_entries(self) -> None:
+        body = [
+            object_instruction(0x2000, "cmp", "w8, #0x1e"),
+            object_instruction(0x2004, "mov", "w8, #0xe"),
+        ]
+        self.assertEqual(recover_genter_dispatch_routes(body), [])
+
     def test_recovers_producer_argument_bindings(self) -> None:
         body = [
             object_instruction(0x2F00, "pacibsp"),
