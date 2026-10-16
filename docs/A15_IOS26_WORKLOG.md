@@ -542,7 +542,9 @@ the historical `ip_kobject + 0x10` no-senders handoff now lands in
 `ip_pdrequest`, while XNU 12377 reads the authenticated `ip_nsrequest` union at
 `ip_kobject`. The old `ipc_object` bit operations are also incompatible with
 Darwin 25's typed/state header and signed label pointer. The active copy path
-remains blocked.
+remains blocked. A defense-in-depth gate was also added at the start of
+`task_copy_ipc_entry`: iOS 26 or XNU major 12377 and later returns before the
+first legacy target-port read or write.
 
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the

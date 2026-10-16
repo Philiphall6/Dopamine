@@ -343,7 +343,8 @@ contract break in the historical right-copy route: `ipc_object` grew from 8 to
 16 bytes, old flag bits changed meaning, `ip_kobject + 0x10` now selects
 `ip_pdrequest` instead of `ip_nsrequest`, and the destination pointer field is
 authenticated with a different discriminator. The exact-target stop therefore
-remains mandatory.
+remains mandatory. A second guard now blocks the legacy copy function itself
+for iOS 26 or XNU major 12377 and later, before its first target-port read.
 
 ## End-to-End Chain Status
 

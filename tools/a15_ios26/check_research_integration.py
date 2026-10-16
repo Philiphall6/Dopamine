@@ -476,6 +476,20 @@ def main() -> int:
         active_stop >= 0 and ipc_copy >= 0 and active_stop < ipc_copy,
         "exact-target IPC census no longer stops before task_copy_ipc_entry",
     )
+    copy_start = ipc_port.find("int task_copy_ipc_entry(")
+    copy_end = ipc_port.find("static uint64_t process_find_open_userclient_legacy", copy_start)
+    require(copy_start >= 0 and copy_end > copy_start, "legacy IPC copy body is missing")
+    copy_body = ipc_port[copy_start:copy_end]
+    copy_guard = copy_body.find("gTitanContext.os_major_version >= 26 || xnu_major >= 12377")
+    first_legacy_read = copy_body.find("kread32(ipc_entry + 8)")
+    require(
+        copy_guard >= 0 and first_legacy_read >= 0 and copy_guard < first_legacy_read,
+        "Darwin 25 legacy IPC copy guard is missing or follows the first target read",
+    )
+    require(
+        "refusing legacy IPC right copy on Darwin 25" in copy_body,
+        "Darwin 25 legacy IPC copy guard lacks a diagnostic marker",
+    )
     for marker in (
         "!titan_gadget(tpidrro_el0)",
         "!titan_gadget(write)",

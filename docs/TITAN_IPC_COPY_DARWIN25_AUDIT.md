@@ -104,9 +104,13 @@ validation of the rest of the routine.
 ## Decision
 
 The current exact-target route must keep the unconditional stop before
-`task_copy_ipc_entry`. No active v6 should call this function. Before any later
-device-side work, an offline design would need to satisfy all of these
-independent contracts:
+`task_copy_ipc_entry`. The function itself now has a second defensive gate: it
+returns before reading or mutating any port when the runtime reports iOS 26 or
+XNU major 12377 and later. This does not make the historical mechanism
+compatible; it prevents an accidental call if a later control-flow change
+bypasses the outer exact-target stop. No active v6 should call this function.
+Before any later device-side work, an offline design would need to satisfy all
+of these independent contracts:
 
 - typed `ipc_object` state and label lifetime;
 - field-specific pointer authentication;
