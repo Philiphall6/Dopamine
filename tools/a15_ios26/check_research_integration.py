@@ -65,7 +65,7 @@ def main() -> int:
     with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
         app_info = plistlib.load(stream)
     require(app_info.get("A15ProbeRevision") ==
-            "self-gpu-client-v3+rtkit-mmio-disabled-v1",
+            "self-gpu-client-v4+rtkit-mmio-disabled-v1",
             "app Info.plist does not identify the MMIO-disabled revision")
     require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
             "app Info.plist does not expose the MMIO safety mode")
@@ -467,15 +467,18 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=self-gpu-client-v3+rtkit-mmio-disabled-v1" in jailbreaker,
+        "revision=self-gpu-client-v4+rtkit-mmio-disabled-v1" in jailbreaker,
         "active probe entry does not identify the MMIO-disabled build",
     )
     queue_probe_start = titan.find('titan_checkpoint(@"titan.self-gpu.queue-selector", @"START"')
-    local_gate = titan.find("before != 1 || after_device != 1 || before_name == MACH_PORT_NULL")
-    selector_call = titan.find("IOConnectCallStructMethod(after_name,")
+    local_gate = titan.find("if (!baseline_consistent || candidate_count != 1 ||")
+    selector_call = titan.find("IOConnectCallStructMethod(candidate_name,")
     active_stop = titan.find('titan_checkpoint(@"titan.self-gpu", @"STOP"')
     require(0 <= local_gate < queue_probe_start < selector_call < active_stop,
             "local queue selector must follow the stable, unique local-right gate")
+    require('candidate_count = titan_count_local_gpu_clients("after-metal-queue"' in titan and
+            'metal_queue = [device newCommandQueue]' in titan,
+            "Metal queue bootstrap must be measured before the local selector")
     require('queue_created = kr == KERN_SUCCESS && output_size == sizeof(output)' in titan and
             'titan_checkpoint(@"titan.self-gpu.queue-selector", queue_created' in titan,
             "local queue selector result must have a persistent checkpoint")
