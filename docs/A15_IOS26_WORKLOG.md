@@ -517,6 +517,13 @@ two logged matches, no truncated match, and stable final table/PID checks. The
 next bounded source revision profiles only the seven read-only downstream
 fields needed to compare the two user clients; the pre-copy stop remains in
 place.
+GitHub Actions run `38881947358` built that v5 source at commit
+`bfd9c4f2752422ce2001c1842bf401f552e98a7b` successfully. Package inspection
+confirmed the `PROFILE`, `PROFILE-COMPARE`, profile counters, v5 revision, and
+explicit pre-copy stop. The resulting
+`Dopamine-A15-iOS26-ipc-profile-v5-bfd9c4f.ipa` is 55,474,513 bytes with
+SHA-256 `97C911785BAD3E78417AAFF8EA3E4B62528CE53A008ECC89B9D6F536356E96E9`.
+Device confirmation is pending.
 
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
