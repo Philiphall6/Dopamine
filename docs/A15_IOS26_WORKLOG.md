@@ -478,6 +478,17 @@ If those stages are eventually satisfied, Stage-2 still requires the typed
 transitions. Nothing in the recovered table grants the missing UAT leaf
 permission or turns guest translation into a host Stage-1 write primitive.
 
+The active IPC branch now has a v3 source revision. Apple's adjacent
+`xnu-12377.1.9` layout confirms that each table entry is `0x18` bytes with the
+signed object pointer at `+0x0` and `ie_bits` at `+0x8`. It also confirms that
+the port header uses byte-sized `io_type` plus a three-bit `io_state`, replacing
+the legacy bit-31 active marker and low-ten-bit type consumed by Titan's old
+scan. The exact-target census now snapshots the complete entry before and
+after following it, requires capability rights and an in-space object state,
+and keeps the `IOMachPort` plus user-client vtables as the final attribution
+checks. This revision remains read-only and still stops before IPC right copy
+or GFX submission; build and device confirmation are pending.
+
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
 `0x70000000#` family. Its earlier iOS 17 round-two post records UAT as subsystem

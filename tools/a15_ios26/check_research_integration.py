@@ -254,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_CENSUS_V2_BUILT" in report,
-        "report does not record the verified IPC census v2 build state",
+        "ACTIVE_TITAN_PROBE_IPC_CENSUS_V3_SOURCE_READY" in report,
+        "report does not record the IPC census v3 source state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")
@@ -349,10 +349,19 @@ def main() -> int:
         "TITAN_IPC_CENSUS_ENTRY_MAX",
         "TITAN_IPC_CENSUS_LOG_MAX",
         "TITAN_IPC_CENSUS_TYPE_LOG_MAX",
+        "TITAN_IPC_OBJECT_TYPE_COUNT",
+        "TITAN_IPC_OBJECT_STATE_COUNT",
         "TITAN_IOS26_IPC_SPACE_TABLE_OFFSET",
         "TITAN_IOS26_IPC_ENTRY_SIZE",
+        "TITAN_IOS26_IPC_ENTRY_BITS_OFFSET",
+        "TITAN_IOS26_IPC_ENTRY_RIGHT_MASK",
         "TITAN_IOS26_IPC_PORT_KOBJECT_OFFSET",
         "TITAN_IOS26_IOMACHPORT_OBJECT_OFFSET",
+        "TITAN_IOS26_IO_STATE_IN_SPACE",
+        "TITAN_IOS26_IO_STATE_IN_SPACE_IMMOVABLE",
+        "TITAN_XNU12377_IOT_IOKIT_CONNECT",
+        "struct titan_ipc_entry_snapshot",
+        "offsetof(struct titan_ipc_entry_snapshot, bits)",
         "TITAN_IOS26_TASK_LAYOUT_START",
         "TITAN_IOS26_TASK_LAYOUT_END",
         "TITAN_IOS26_IPC_SPACE_LAYOUT_END",
@@ -363,10 +372,15 @@ def main() -> int:
         "titan_read_pointer_exact",
         "gTitanContext.iomachport_vtable",
         "wrapper_vtable != gTitanContext.iomachport_vtable",
-        "if (!(state_word & 0x80000000U))",
+        "entry_start.bits & TITAN_IOS26_IPC_ENTRY_RIGHT_MASK",
+        "io_type = object_bits & 0xffU",
+        "io_state = (object_bits >> 8) & 0x7U",
+        "memcmp(&entry_start, &entry_confirm, sizeof(entry_start))",
+        "memcmp(&entry_start, &entry_end, sizeof(entry_start))",
         "titan.ipc-census CANDIDATE",
-        "titan.ipc-census DECODE revision=ipc-census-v2",
-        "titan.ipc-census TYPE",
+        "titan.ipc-census DECODE revision=ipc-census-v3",
+        "titan.ipc-census OBJECT-TYPE",
+        "titan.ipc-census OBJECT-STATE",
         "titan.ipc-census SUMMARY",
         "allocation=0x%x entries=%u entry-size=0x%x tail=0x%x",
         "table-stable=%s pid-stable=%s",
@@ -376,8 +390,8 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=ipc-census-v2" in jailbreaker,
-        "active probe entry does not identify the IPC census v2 build",
+        "revision=ipc-census-v3" in jailbreaker,
+        "active probe entry does not identify the IPC census v3 build",
     )
     require(
         "INFO: iOS 26 IOMemoryMap primary candidate" in kernel_patchfinder
@@ -406,6 +420,11 @@ def main() -> int:
         and "ipc_table_count = ipc_table_size / ipc_entry_size" in census_body
         and "ipc_table_tail = ipc_table_size % ipc_entry_size" in census_body,
         "IPC census does not preserve the bounded complete-entry plus allocation-tail contract",
+    )
+    require(
+        "state_word & 0x80000000U" not in census_body
+        and "old_type" not in census_body,
+        "exact-target IPC census still uses the obsolete packed active/type word",
     )
     for marker in (
         "titan.iorvbar.wrapper-vtable-read",
