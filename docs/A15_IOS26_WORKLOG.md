@@ -675,6 +675,28 @@ The exact Darwin 25 XNU source accounts for the reference count on each
 specific leaf table. This branch is therefore recorded as an unverified claim
 and was not added to the active device probe.
 
+### 2026-10-16 15:06 CEST device reboot
+
+The `rtkit-metadata-v1` IPA from commit `f5fe035` built in Actions run
+`38903304606` and was handed to the user for installation. The USB host
+confirmed `iPhone14,2`, iOS `26.0.1`, build `23A355` before the attempted
+scan. The device disconnected and reconnected. A retained panic report at
+`outputs/device/crashes-20261016/panic-full-2026-10-16-150638.0002.ips`
+records `GFX SERROR` from `kernel_task`, `l2c_err_adr
+0x2400000206050000`, and Dopamine in the foreground. The low address bits
+correspond to the `0x206050000` physical IORVBAR descriptor discovered in
+the prior read-only probe.
+
+The post-reboot HouseArrest copy of
+`Documents/a15-ios26-active-probe.jsonl` still has only 14 runs; its newest
+`probe.entry` is at 14:33:56 CEST and ends at `titan.command-buffers FAIL`.
+There is no 15:06 `probe.entry` or `titan.rtkit-metadata` checkpoint. The
+installed app's exact binary revision was not independently verified, so the
+panic cannot yet be attributed to the new MMIO read. Do not repeat the scan
+or treat this as a metadata pass. First verify the installed binary and
+obtain a pre-panic checkpoint through a path that does not depend on a live
+GFX register read.
+
 ### Verification
 
 - `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests

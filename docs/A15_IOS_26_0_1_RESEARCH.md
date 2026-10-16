@@ -1580,21 +1580,14 @@ missing safe Darwin 25 IPC-right transfer, not by the earlier IORVBAR walk.
 They consistently resolve the same GFX register mapping and two complete
 IOGPU user-client profiles, while stopping before `task_copy_ipc_entry`.
 
-`rtkit-metadata-v1` therefore branches before command-buffer setup and follows
-only the read dependency that is already available. It reads the reset vector
-from the validated IORVBAR mapping, checks it against the physical-memory
-range, obtains an existing kernel alias through `phystokv`, and reads one
-bounded 16 KiB bootstrap page with the ClearSword exact-read primitive. A
-unique bootstrap marker and the adjacent text/data metadata must pass size,
-ordering, address, and stability checks.
-
-This is a genuinely new accessible stage because it can identify the exact
-RTKit bootstrap layout without stealing backboardd's port or creating GPU
-command buffers. It remains a discovery probe: no `kmap`, firmware copy,
-IPC-right transfer, IOKit call, or write is performed. A successful device run
-would justify the next read-only step, correlating those metadata addresses
-with the extracted RTKit image. It would not itself demonstrate injection,
-protected-write access, or an SPTM/TXM bypass.
+`rtkit-metadata-v1` was an unverified proposal to read the reset vector from
+the IORVBAR mapping and inspect a bounded 16 KiB bootstrap page. The installed
+binary revision was not independently confirmed, and the persistent device log
+contains no `titan.rtkit-metadata` checkpoint. After an unattributed GFX SError
+panic, the exact A15 target now stops before that register read. A validated
+mapping is not proof that live MMIO access is safe or that RTKit metadata is
+reachable. The next evidence must come from offline firmware correlation or a
+non-MMIO source; no injection or SPTM/TXM bypass has been demonstrated.
 
 ## pmap-tte-remove Cross-Check
 

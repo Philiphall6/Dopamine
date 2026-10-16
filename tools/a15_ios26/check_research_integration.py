@@ -62,6 +62,13 @@ def main() -> int:
     settings = (ROOT / "Application/Dopamine/UI/Settings/DOSettingsController.m").read_text()
     main_view = (ROOT / "Application/Dopamine/UI/DOMainViewController.m").read_text()
     jailbreaker = (ROOT / "Application/Dopamine/Jailbreak/DOJailbreaker.m").read_text()
+    with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
+        app_info = plistlib.load(stream)
+    require(app_info.get("A15ProbeRevision") ==
+            "ipc-census-v5+hypervisor-preflight-v2+rtkit-mmio-disabled-v1",
+            "app Info.plist does not identify the MMIO-disabled revision")
+    require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
+            "app Info.plist does not expose the MMIO safety mode")
     titan = (ROOT / "Application/Dopamine/Exploits/Titan/exploit/titan.m").read_text()
     ipc_port = (
         ROOT / "Application/Dopamine/Exploits/Titan/exploit/ipc_port.c"
@@ -359,6 +366,15 @@ def main() -> int:
         "bounded RTKit metadata probe body is missing",
     )
     rtkit_probe_body = titan[rtkit_probe_start:rtkit_probe_end]
+    mmio_stop = rtkit_probe_body.find('@"MMIO-disabled-v1')
+    mmio_read = rtkit_probe_body.find('titan_read_exact_scalar(gTitanContext.iorvbar_kernel_address')
+    require(0 <= mmio_stop < mmio_read, "RTKit MMIO stop must precede the register read")
+    guard_index = rtkit_probe_body.find("if (gTitanContext.ios26_a15_active_probe)")
+    require(0 <= guard_index < mmio_stop,
+            "RTKit MMIO stop must be gated on the exact A15 target")
+    stop_return = rtkit_probe_body.find("return -1;", mmio_stop)
+    require(0 <= stop_return < mmio_read,
+            "RTKit MMIO stop must return before the register read")
     for forbidden in (
         "kmap(",
         "kwrite",
@@ -451,8 +467,8 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=ipc-census-v5+hypervisor-preflight-v2+rtkit-metadata-v1" in jailbreaker,
-        "active probe entry does not identify the RTKit metadata v1 build",
+        "revision=ipc-census-v5+hypervisor-preflight-v2+rtkit-mmio-disabled-v1" in jailbreaker,
+        "active probe entry does not identify the MMIO-disabled build",
     )
     for marker in (
         "hypervisor-preflight-v2",
