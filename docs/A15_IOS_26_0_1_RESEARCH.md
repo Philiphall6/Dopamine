@@ -1573,6 +1573,57 @@ at dispatch table `7` and describes the `0x70000000#` call family. Its iOS 17
 round-two post also records UAT as subsystem `7` with 13 services. These are
 useful corroborating labels, not evidence of a bypass.
 
+## RTKit Metadata Path
+
+The repeated live runs establish that command-buffer setup is blocked by the
+missing safe Darwin 25 IPC-right transfer, not by the earlier IORVBAR walk.
+They consistently resolve the same GFX register mapping and two complete
+IOGPU user-client profiles, while stopping before `task_copy_ipc_entry`.
+
+`rtkit-metadata-v1` therefore branches before command-buffer setup and follows
+only the read dependency that is already available. It reads the reset vector
+from the validated IORVBAR mapping, checks it against the physical-memory
+range, obtains an existing kernel alias through `phystokv`, and reads one
+bounded 16 KiB bootstrap page with the ClearSword exact-read primitive. A
+unique bootstrap marker and the adjacent text/data metadata must pass size,
+ordering, address, and stability checks.
+
+This is a genuinely new accessible stage because it can identify the exact
+RTKit bootstrap layout without stealing backboardd's port or creating GPU
+command buffers. It remains a discovery probe: no `kmap`, firmware copy,
+IPC-right transfer, IOKit call, or write is performed. A successful device run
+would justify the next read-only step, correlating those metadata addresses
+with the extracted RTKit image. It would not itself demonstrate injection,
+protected-write access, or an SPTM/TXM bypass.
+
+## pmap-tte-remove Cross-Check
+
+The `Indegosblade/pmap-tte-remove` repository (main at
+`78ccf6e580a92569e9d9685f9bd3f4ae7ebe5cfa`, reviewed 2026-10-16)
+claims a 16-bit page-table reference-count overflow from 65,537 mappings of
+one backing page. This claim is not established by its published PoC. The code
+increments a local `created` counter for successful `mach_vm_map` calls and
+prints `created % 65536` as the kernel refcount; it never reads the kernel's
+page-table refcount. On a 16 KiB granule, one L3 table contains only 2,048
+eight-byte PTE slots, so 65,537 distinct virtual mappings span multiple L3
+tables. Mapping one physical backing page repeatedly does not make their
+per-table counts a single counter.
+
+The claimed write proof is also not independent. The PoC writes `0xBB` through
+one retained mapping and reads the same mapping back. Its A17 log shows the
+initial user sentinel `0x4141414141414141` followed by
+`0x41414141414141bb` on later mappings; the latter is classified as a kernel
+PTE even though it is exactly the user sentinel with its low byte changed.
+This does not establish that a page-table page was freed or reclaimed.
+
+Apple's XNU `xnu-12377.1.9` source instead obtains the page-table refcount
+with `sptm_get_page_table_refcnt(tte_to_pa(*tte_p))` in
+`pmap_remove_options_internal`. It checks that the count is zero before
+deallocating that specific leaf table; `ptd_info->wiredcnt` is a separate
+counter. These source-level facts directly challenge the repository's
+refcount arithmetic. No pmap PoC was executed on the iPhone, and this branch
+does not supply the missing Titan IPC transfer or a demonstrated SPTM bypass.
+
 Sources reviewed:
 
 - https://arxiv.org/abs/2510.09272
@@ -1582,3 +1633,5 @@ Sources reviewed:
 - https://df-f.com/blog/ios-17round2
 - https://security.apple.com/research-device
 - https://security.apple.com/documentation/private-cloud-compute/virtualresearchenvironment
+- https://github.com/Indegosblade/pmap-tte-remove/tree/78ccf6e580a92569e9d9685f9bd3f4ae7ebe5cfa
+- https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.1.9/osfmk/arm64/sptm/pmap/pmap.c

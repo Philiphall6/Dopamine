@@ -324,7 +324,12 @@ def main() -> int:
         "kIOS2601IOMemoryMapVtable",
         "kIOS2601GFXIORVBARPhysicalAddress = 0x206050000ULL",
         "kIOS2601GFXIORVBARLength = 0x8ULL",
+        "kIOS2601RTKitBootstrapPageSize = 0x4000",
+        "kIOS2601RTKitBootstrapMarker = 0x7777777777777700ULL",
+        "kIOS2601RTKitMaximumSegmentSize = 0x40000000ULL",
         "titan_read_exact_scalar",
+        "titan_read_exact_window",
+        "titan_probe_rtkit_metadata_readonly",
         "descriptorRanges = titan_read_valid_pointer(descriptor, 0x60",
         "descriptorRangesCount != 1",
         "descriptorPhysical != kIOS2601GFXIORVBARPhysicalAddress",
@@ -339,8 +344,36 @@ def main() -> int:
         "int triggerResult = gfx_write32",
         'dlsym(RTLD_DEFAULT,\n                                                               "clearsword_kreadbuf_exact")',
         "exact-kreadbuf-unavailable",
+        'titan_checkpoint(@"titan.rtkit-metadata", @"START"',
+        '@"titan.rtkit-metadata.iorvbar"',
+        'titan_checkpoint(@"titan.rtkit-metadata.alias"',
+        'titan_checkpoint(@"titan.rtkit-metadata", @"PASS"',
+        'titan_checkpoint(@"titan.rtkit-metadata", @"STOP"',
+        "textSize >= sizeof(uint64_t)",
     ):
         require(marker in titan, f"active Titan adaptation is missing marker: {marker}")
+    rtkit_probe_start = titan.find("static int titan_probe_rtkit_metadata_readonly(void)")
+    rtkit_probe_end = titan.find("const char *cpu_family_to_soc_name", rtkit_probe_start)
+    require(
+        rtkit_probe_start >= 0 and rtkit_probe_end > rtkit_probe_start,
+        "bounded RTKit metadata probe body is missing",
+    )
+    rtkit_probe_body = titan[rtkit_probe_start:rtkit_probe_end]
+    for forbidden in (
+        "kmap(",
+        "kwrite",
+        "physwrite",
+        "gfx_write",
+        "task_copy_ipc_entry",
+        "IOConnectCall",
+        "IOServiceOpen",
+    ):
+        require(forbidden not in rtkit_probe_body, f"read-only RTKit metadata probe contains {forbidden}")
+    rtkit_probe_call = titan.find("titan_probe_rtkit_metadata_readonly()", titan_run)
+    require(
+        rtkit_probe_call >= 0 and rtkit_probe_call < queue_setup,
+        "RTKit metadata probe no longer precedes command-buffer setup",
+    )
     for marker in (
         "int clearsword_kreadbuf_exact",
         "socklen_t read_data_length = (socklen_t)size",
@@ -418,8 +451,8 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=ipc-census-v5" in jailbreaker,
-        "active probe entry does not identify the IPC census v5 build",
+        "revision=ipc-census-v5+hypervisor-preflight-v2+rtkit-metadata-v1" in jailbreaker,
+        "active probe entry does not identify the RTKit metadata v1 build",
     )
     for marker in (
         "hypervisor-preflight-v2",

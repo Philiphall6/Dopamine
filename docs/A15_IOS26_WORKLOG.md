@@ -645,6 +645,36 @@ contained no Hypervisor key. The stable local artifact is
 (55,481,421 bytes, SHA-256
 `7D9313F680187201DFF6988C29F4B17A83D27FDA1253CAEEBC331F6FA15CED16`).
 
+The USB host path was then made reproducible with the 2026-10-11 Windows
+build of `libimobiledevice`. Pairing and identity checks confirmed the live
+target as `iPhone14,2`, iOS `26.0.1`, build `23A355`, `arm64e`. The Dopamine
+container was opened through its installed, signature-qualified bundle ID and
+the append-only checkpoint log was copied to
+`outputs/device/a15-ios26-active-probe-20261016.jsonl`. Its 13 recorded runs
+confirm the same stable boundary: ClearSword KRW, IORVBAR resolution, and both
+IOGPU profiles pass; the exact-target branch stops before
+`task_copy_ipc_entry`.
+
+The next adaptation is `rtkit-metadata-v1`. It uses the already validated
+IORVBAR mapping to read the GFX reset-vector register, validates the physical
+range and 16 KiB alignment, resolves an existing kernel alias with `phystokv`,
+and reads exactly one 16 KiB bootstrap page through
+`clearsword_kreadbuf_exact`. It then requires a unique
+`0x7777777777777700` marker, validates the historical text/data metadata
+layout, and rereads the marker window for stability. The probe stops after
+reporting the metadata. It does not call `kmap`, copy firmware, transfer an
+IPC right, open/call an IOKit user client, or write memory. This creates a new
+observable RTKit path before the blocked command-buffer setup without claiming
+an injection or bypass.
+
+In parallel, `Indegosblade/pmap-tte-remove` was reviewed at commit
+`78ccf6e`. Its advertised overflow count is derived from the PoC's mapping
+count rather than a measured L3 page-table count. The published A17 output
+classifies the modified user sentinel `0x41414141414141bb` as a kernel PTE.
+The exact Darwin 25 XNU source accounts for the reference count on each
+specific leaf table. This branch is therefore recorded as an unverified claim
+and was not added to the active device probe.
+
 ### Verification
 
 - `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests
