@@ -422,19 +422,25 @@ def main() -> int:
         "active probe entry does not identify the IPC census v5 build",
     )
     for marker in (
-        "hypervisor-preflight-v1",
+        "hypervisor-preflight-v2",
         "static void A15RunHypervisorPreflight(void)",
-        'dlsym(hypervisorHandle, "hv_vm_create")',
-        'dlsym(hypervisorHandle, "hv_vm_map")',
-        'dlsym(hypervisorHandle, "hv_vcpu_create")',
-        'dlsym(hypervisorHandle, "hv_vcpu_run")',
+        'dlsym(symbolScope, "hv_vm_create")',
+        'dlsym(symbolScope, "hv_vm_map")',
+        'dlsym(symbolScope, "hv_vcpu_create")',
+        'dlsym(symbolScope, "hv_vcpu_run")',
+        'A15ActiveProbeCheckpoint(@"hypervisor.path"',
+        'IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/product")',
+        'IORegistryEntryCreateCFProperty(product, CFSTR("has-virtualization")',
+        'IORegistryCreateIterator(kIOMainPortDefault',
+        'A15ActiveProbeCheckpoint(@"hypervisor.ioreg"',
+        'A15ActiveProbeCheckpoint(@"hypervisor.dyld"',
         'CFSTR("com.apple.private.hypervisor")',
         'CFSTR("com.apple.private.hypervisor.vmapple")',
         'CFSTR("com.apple.security.hypervisor")',
         'A15ReadOnlySysctlValue("kern.hv_support")',
         'A15ReadOnlySysctlValue("kern.hv_vmm_present")',
         'A15ReadOnlySysctlValue("kern.hv_disable")',
-        'A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"STOP", @"read-only; no hv_* function invoked")',
+        'A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"STOP", @"read-only; no hv_* function or IOKit user-client open invoked")',
     ):
         require(marker in jailbreaker, f"Hypervisor preflight is missing marker: {marker}")
     preflight_start = jailbreaker.find("static void A15RunHypervisorPreflight(void)")
@@ -452,6 +458,7 @@ def main() -> int:
         "kwrite",
         "task_copy_ipc_entry",
         "IOConnectCall",
+        "IOServiceOpen",
     ):
         require(forbidden not in preflight_body, f"read-only Hypervisor preflight contains {forbidden}")
     require(

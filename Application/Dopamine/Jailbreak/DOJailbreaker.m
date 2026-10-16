@@ -32,10 +32,13 @@
 #import <libjailbreak/kcall_arm64.h>
 #import <libjailbreak/basebin_gen.h>
 #import <CoreServices/LSApplicationProxy.h>
+#import <IOKit/IOKitLib.h>
+#import <mach-o/dyld.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
 #import <fcntl.h>
 #import <errno.h>
+#import <unistd.h>
 #import "spawn.h"
 #import "clock_alarm.h"
 #import <IOSurface/IOSurfaceRef.h>
@@ -127,15 +130,111 @@ static BOOL A15EntitlementValueEnabled(CFTypeRef value)
     return YES;
 }
 
+static NSString *A15ReadOnlyPathState(const char *path)
+{
+    struct stat attributes = {0};
+    errno = 0;
+    if (stat(path, &attributes) != 0) {
+        return [NSString stringWithFormat:@"missing(errno=%d)", errno];
+    }
+    return [NSString stringWithFormat:@"present(mode=0%o,size=%lld)",
+        (unsigned int)(attributes.st_mode & 07777), (long long)attributes.st_size];
+}
+
+static BOOL A15ContainsVirtualizationToken(const char *value)
+{
+    if (!value) return NO;
+    NSString *lowercase = [[NSString stringWithUTF8String:value] lowercaseString];
+    return [lowercase containsString:@"hypervisor"] ||
+        [lowercase containsString:@"virtual"] ||
+        [lowercase containsString:@"vmm"] ||
+        [lowercase containsString:@"guest"];
+}
+
+static void A15LogVirtualizationRegistrySurface(void)
+{
+    io_registry_entry_t product = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/product");
+    CFTypeRef hasVirtualization = product != IO_OBJECT_NULL
+        ? IORegistryEntryCreateCFProperty(product, CFSTR("has-virtualization"), kCFAllocatorDefault, 0)
+        : NULL;
+    NSString *propertyDetail = @"absent";
+    if (hasVirtualization) {
+        CFStringRef description = CFCopyDescription(hasVirtualization);
+        if (description) {
+            propertyDetail = [NSString stringWithFormat:@"present(value=%@)", (__bridge NSString *)description];
+            CFRelease(description);
+        } else {
+            propertyDetail = @"present(value=unprintable)";
+        }
+    }
+    A15ActiveProbeCheckpoint(@"hypervisor.device-tree",
+        hasVirtualization ? @"PASS" : @"BLOCKED",
+        [NSString stringWithFormat:@"product=%@ has-virtualization=%@",
+         product != IO_OBJECT_NULL ? @"present" : @"missing", propertyDetail]);
+    if (hasVirtualization) CFRelease(hasVirtualization);
+    if (product != IO_OBJECT_NULL) IOObjectRelease(product);
+
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    kern_return_t iteratorResult = IORegistryCreateIterator(kIOMainPortDefault,
+        kIOServicePlane, kIORegistryIterateRecursively, &iterator);
+    uint32_t scanned = 0;
+    uint32_t matches = 0;
+    uint32_t logged = 0;
+    if (iteratorResult == KERN_SUCCESS) {
+        io_registry_entry_t entry = IO_OBJECT_NULL;
+        while (scanned < 8192 && (entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+            io_name_t name = {0};
+            io_name_t className = {0};
+            IORegistryEntryGetName(entry, name);
+            IOObjectGetClass(entry, className);
+            if (A15ContainsVirtualizationToken(name) || A15ContainsVirtualizationToken(className)) {
+                matches++;
+                if (logged < 32) {
+                    A15ActiveProbeCheckpoint(@"hypervisor.ioreg-match", @"INFO",
+                        [NSString stringWithFormat:@"name=%s class=%s", name, className]);
+                    logged++;
+                }
+            }
+            scanned++;
+            IOObjectRelease(entry);
+        }
+        IOObjectRelease(iterator);
+    }
+    A15ActiveProbeCheckpoint(@"hypervisor.ioreg", @"INFO",
+        [NSString stringWithFormat:@"iterator=0x%x scanned=%u matches=%u logged=%u truncated=%u read-only=yes",
+         iteratorResult, scanned, matches, logged, matches > logged ? matches - logged : 0]);
+}
+
 static void A15RunHypervisorPreflight(void)
 {
     A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"START", @"read-only userland surface discovery");
 
-    void *hypervisorHandle = dlopen("/System/Library/Frameworks/Hypervisor.framework/Hypervisor", RTLD_LAZY | RTLD_LOCAL);
-    BOOL hvVmCreate = hypervisorHandle && dlsym(hypervisorHandle, "hv_vm_create");
-    BOOL hvVmMap = hypervisorHandle && dlsym(hypervisorHandle, "hv_vm_map");
-    BOOL hvVcpuCreate = hypervisorHandle && dlsym(hypervisorHandle, "hv_vcpu_create");
-    BOOL hvVcpuRun = hypervisorHandle && dlsym(hypervisorHandle, "hv_vcpu_run");
+    const char *hypervisorPaths[] = {
+        "/System/Library/Frameworks/Hypervisor.framework/Hypervisor",
+        "/System/Library/PrivateFrameworks/Hypervisor.framework/Hypervisor",
+        "/usr/lib/system/libsystem_hypervisor.dylib",
+        NULL,
+    };
+    void *hypervisorHandle = NULL;
+    for (size_t i = 0; hypervisorPaths[i]; i++) {
+        dlerror();
+        void *candidate = dlopen(hypervisorPaths[i], RTLD_LAZY | RTLD_LOCAL);
+        const char *loadError = candidate ? NULL : dlerror();
+        A15ActiveProbeCheckpoint(@"hypervisor.path", candidate ? @"PASS" : @"INFO",
+            [NSString stringWithFormat:@"path=%s file=%@ dlopen=%@ error=%s",
+             hypervisorPaths[i], A15ReadOnlyPathState(hypervisorPaths[i]),
+             candidate ? @"present" : @"missing", loadError ?: "none"]);
+        if (!hypervisorHandle && candidate) {
+            hypervisorHandle = candidate;
+        } else if (candidate) {
+            dlclose(candidate);
+        }
+    }
+    void *symbolScope = hypervisorHandle ?: RTLD_DEFAULT;
+    BOOL hvVmCreate = dlsym(symbolScope, "hv_vm_create") != NULL;
+    BOOL hvVmMap = dlsym(symbolScope, "hv_vm_map") != NULL;
+    BOOL hvVcpuCreate = dlsym(symbolScope, "hv_vcpu_create") != NULL;
+    BOOL hvVcpuRun = dlsym(symbolScope, "hv_vcpu_run") != NULL;
     NSString *frameworkDetail = [NSString stringWithFormat:
         @"framework=%@ hv_vm_create=%@ hv_vm_map=%@ hv_vcpu_create=%@ hv_vcpu_run=%@",
         hypervisorHandle ? @"present" : @"missing",
@@ -144,6 +243,24 @@ static void A15RunHypervisorPreflight(void)
         hvVcpuCreate ? @"present" : @"missing",
         hvVcpuRun ? @"present" : @"missing"];
     A15ActiveProbeCheckpoint(@"hypervisor.framework", hypervisorHandle ? @"PASS" : @"BLOCKED", frameworkDetail);
+
+    uint32_t dyldImages = _dyld_image_count();
+    uint32_t dyldMatches = 0;
+    for (uint32_t i = 0; i < dyldImages; i++) {
+        const char *imageName = _dyld_get_image_name(i);
+        if (A15ContainsVirtualizationToken(imageName)) {
+            dyldMatches++;
+            if (dyldMatches <= 16) {
+                A15ActiveProbeCheckpoint(@"hypervisor.dyld-match", @"INFO",
+                    [NSString stringWithFormat:@"image=%s", imageName]);
+            }
+        }
+    }
+    A15ActiveProbeCheckpoint(@"hypervisor.dyld", @"INFO",
+        [NSString stringWithFormat:@"images=%u matches=%u logged=%u",
+         dyldImages, dyldMatches, MIN(dyldMatches, 16)]);
+
+    A15LogVirtualizationRegistrySurface();
 
     void *securityHandle = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY | RTLD_LOCAL);
     A15SecTaskCreateFromSelfFn createTask = securityHandle ? dlsym(securityHandle, "SecTaskCreateFromSelf") : NULL;
@@ -178,7 +295,7 @@ static void A15RunHypervisorPreflight(void)
     if (securityHandle) dlclose(securityHandle);
     if (hypervisorHandle) dlclose(hypervisorHandle);
 
-    A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"STOP", @"read-only; no hv_* function invoked");
+    A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"STOP", @"read-only; no hv_* function or IOKit user-client open invoked");
 }
 
 - (NSError *)gatherSystemInformation
@@ -355,7 +472,7 @@ static void A15RunHypervisorPreflight(void)
 
     NSString *runID = NSUUID.UUID.UUIDString;
     setenv("A15_ACTIVE_PROBE_RUN_ID", runID.UTF8String, 1);
-    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=ipc-census-v5+hypervisor-preflight-v1");
+    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=ipc-census-v5+hypervisor-preflight-v2");
 
     A15RunHypervisorPreflight();
 

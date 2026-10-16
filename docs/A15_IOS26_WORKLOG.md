@@ -617,6 +617,26 @@ Hypervisor entitlement keys is granted. The stable local artifact is
 This confirms that a device result will measure the ordinary app's actual
 boundary rather than a signing-time entitlement supplied for the experiment.
 
+The first exact-device run of `hypervisor-preflight-v1` on 2026-10-16 reached
+the expected stop. `Hypervisor.framework` and all four resolved `hv_*` symbols
+were absent; the three entitlement queries returned absent;
+`kern.hv_vmm_present` returned zero; and reads of `kern.hv_support` and
+`kern.hv_disable` were rejected with `EPERM`. No Hypervisor function was
+invoked. Titan remained independently stable: the IPC table contained 2,730
+entries, the exact IOGPU clients remained at indices `537` and `1009`, and
+both profiles remained complete. Two object headers were outside the IPC
+space and were also the only `io-state=0` entries, while the table and PID
+stability checks still passed.
+
+The next bounded adaptation is `hypervisor-preflight-v2`. It preserves the
+same no-VM boundary while reporting filesystem and `dlopen` results for public,
+private, and `libsystem_hypervisor` locations; reading the live
+`IODeviceTree:/product/has-virtualization` property; enumerating a maximum of
+8,192 IORegistry entries for virtualization-related names/classes; and
+checking loaded dyld image names. It never opens an IOKit user client. This
+separates an absent public ABI from a private runtime service that remains
+observable on the exact device.
+
 ### Verification
 
 - `python -m unittest discover -s tools/a15_ios26 -p "test_*.py"`: 49 tests

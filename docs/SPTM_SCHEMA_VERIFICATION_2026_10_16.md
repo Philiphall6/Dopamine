@@ -155,3 +155,21 @@ signature grants no `com.apple.private.hypervisor`,
 `com.apple.security.hypervisor` entitlement. The device probe can therefore
 distinguish a genuinely exposed framework/sysctl edge from a private
 entitlement path that was added by the test build itself.
+
+## Exact-Device Result And V2 Adaptation
+
+The first v1 run on iPhone14,2 build 23A355 confirmed the earliest normal-API
+boundary: the framework and symbols were missing, all queried Hypervisor
+entitlements were absent, `kern.hv_vmm_present=0`, and the other two HV
+sysctls returned `EPERM`. This rules out a directly callable
+`Hypervisor.framework` route from the signed application, but it does not by
+itself distinguish a missing image from a differently named private service.
+
+`hypervisor-preflight-v2` therefore adds only passive discovery. It records
+the path and loader result for three candidate Hypervisor images, reads the
+live device-tree virtualization property, scans a bounded IORegistry iterator
+for virtualization-related names/classes, and inventories matching loaded
+dyld images. It does not call an `hv_*` symbol, open an IOKit user client,
+transfer an IPC right, or write kernel/protected memory. Its purpose is to
+identify the next actually exposed edge, not to assume that the private
+Stage-2 service has a public framework frontend.
