@@ -348,6 +348,7 @@ def main() -> int:
     for marker in (
         "TITAN_IPC_CENSUS_ENTRY_MAX",
         "TITAN_IPC_CENSUS_LOG_MAX",
+        "TITAN_IPC_CENSUS_MATCH_LOG_MAX",
         "TITAN_IPC_CENSUS_TYPE_LOG_MAX",
         "TITAN_IPC_OBJECT_TYPE_COUNT",
         "TITAN_IPC_OBJECT_STATE_COUNT",
@@ -378,7 +379,9 @@ def main() -> int:
         "memcmp(&entry_start, &entry_confirm, sizeof(entry_start))",
         "memcmp(&entry_start, &entry_end, sizeof(entry_start))",
         "titan.ipc-census CANDIDATE",
-        "titan.ipc-census DECODE revision=ipc-census-v3",
+        "titan.ipc-census MATCH",
+        "match-logged=%zu match-truncated=%zu",
+        "titan.ipc-census DECODE revision=ipc-census-v4",
         "titan.ipc-census OBJECT-TYPE",
         "titan.ipc-census OBJECT-STATE",
         "titan.ipc-census SUMMARY",
@@ -390,8 +393,8 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=ipc-census-v3" in jailbreaker,
-        "active probe entry does not identify the IPC census v3 build",
+        "revision=ipc-census-v4" in jailbreaker,
+        "active probe entry does not identify the IPC census v4 build",
     )
     require(
         "INFO: iOS 26 IOMemoryMap primary candidate" in kernel_patchfinder

@@ -267,7 +267,7 @@ static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString
 
     NSString *runID = NSUUID.UUID.UUIDString;
     setenv("A15_ACTIVE_PROBE_RUN_ID", runID.UTF8String, 1);
-    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=ipc-census-v3");
+    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=ipc-census-v4");
 
     A15ActiveProbeCheckpoint(@"xpf.gather", @"START", @"");
     NSError *error = [self gatherSystemInformation];
