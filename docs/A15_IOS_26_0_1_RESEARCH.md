@@ -12,7 +12,7 @@ bootstrap.
 - SoC: A15
 - OS: iOS 26.0.1
 - Kernel: Darwin 25.0.0
-- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_V3_BUILT`
+- Research state: `ACTIVE_TITAN_PROBE_IPC_CENSUS_V4_BUILT`
 - Operating mode: exact-target staged execution with persistent checkpoints
 
 The durable offline-analysis handoff is
@@ -23,11 +23,11 @@ segment registration plus the downstream protected frame-type policy.
 
 ## Latest Build Evidence
 
-- Source commit: `30579d2c1b3cb32b2697be95fea188e91ed3806a`
-- GitHub Actions run: `38871258849` (`PASS`, 12m 47s)
-- IPA: `Dopamine-A15-iOS26-ipc-census-v3-30579d2.ipa`
-- Size: `55,473,253` bytes
-- SHA-256: `74EBB99892BDD649957748B64A31B05E07E07025686F3B2B3C6A57D5491C122B`
+- Source commit: `d55d66724ba09d82727f97d106de1ff740fcdeb3`
+- GitHub Actions run: `38879780175` (`PASS`, 6m 08s)
+- IPA: `Dopamine-A15-iOS26-ipc-census-v4-d55d667.ipa`
+- Size: `55,473,398` bytes
+- SHA-256: `1F518E8F11F3815E896B51FDCA632C98F805304C435C59BF209D27F656BB36AB`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` and
   `Frameworks/ClearSword.framework/ClearSword` are present.
@@ -35,12 +35,13 @@ segment registration plus the downstream protected frame-type policy.
 The packaged ClearSword binary contains `clearsword_kreadbuf_exact`. The
 packaged Titan binary contains all nine exact-read map/descriptor checkpoints,
 the bounded process-name discovery, the symmetric IPC-layout markers, and the
-IPC census v3 `DECODE`, `START`, `OBJECT-TYPE`, `OBJECT-STATE`, `CANDIDATE`,
-`SUMMARY`, and `STOP` markers. The probe entry and decoder both identify
-revision `ipc-census-v3`. The binary records `ie-bits`, `io-type`, `io-state`,
-and stable-entry counters, and no longer contains the old exact-target
-`old-type` marker. It retains the explicit `task_copy_ipc_entry not reached`
-stop marker. Source inspection and the integration checker confirm that the
+IPC census v4 `DECODE`, `START`, `OBJECT-TYPE`, `OBJECT-STATE`, `CANDIDATE`,
+`MATCH`, `SUMMARY`, and `STOP` markers. The probe entry and decoder both
+identify revision `ipc-census-v4`. The binary records `ie-bits`, `io-type`,
+`io-state`, stable-entry counters, and dedicated exact-match logged/truncated
+counters, and no longer contains the old exact-target `old-type` marker. It
+retains the explicit `task_copy_ipc_entry not reached` stop marker. Source
+inspection and the integration checker confirm that the
 census remains read-only and requires stable complete entry snapshots before
 and after following an object. The iOS 26 patchfinder still reports the
 rejected primary `IOMemoryMap::fAddress` match as an expected accessor-pattern
@@ -256,15 +257,46 @@ two identical snapshots before following the object and a third identical
 snapshot after the wrapper/object reads. Candidate attribution still requires
 the already observed `IOMachPort` wrapper vtable and the expected user-client
 vtable. The probe remains read-only and returns before `task_copy_ipc_entry`,
-GFX submission, MMIO, physical write, privilege changes, and bootstrap. It has
-compiled successfully and passed package-marker inspection, but has not yet
-been run on the device.
+GFX submission, MMIO, physical write, privilege changes, and bootstrap. The v3
+implementation compiled successfully, passed package-marker inspection, and
+was subsequently run on the device as recorded below.
 
 Primary layout references:
 
 - https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.1.9/osfmk/ipc/ipc_entry.h
 - https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.1.9/osfmk/ipc/ipc_object.h
 - https://github.com/apple-oss-distributions/xnu/blob/xnu-12377.1.9/osfmk/ipc/ipc_types.h
+
+## IPC Census v3 Device Result
+
+The v3 IPA was run on the exact target on 2026-10-16. It decoded the signed
+`backboardd` table as a stable `0xc000`-byte allocation containing 2,048
+complete `0x18`-byte entries. All 1,649 nonzero entries carried capability
+rights, resolved to valid port objects, and retained identical complete-entry
+snapshots. The final table pointer and process ID were also unchanged.
+
+The modern object header split is confirmed on-device: 547 objects used
+in-space state `1`, 1,102 used in-space-immovable state `2`, and no other state
+survived the census gate. Type `36` contained 85 objects; all 85 reached the
+observed `IOMachPort` wrapper and exactly two reached Titan's expected IOGPU
+user-client vtable. Across the full census there were 358 stable wrapper/object
+candidates and no unstable entry.
+
+The v3 generic-candidate log was intentionally capped at 64 lines, so the two
+exact matches were counted but their indices were not emitted. The v4 source
+adds a separate bounded `MATCH` record for exact vtable matches and leaves the
+read-only stop before `task_copy_ipc_entry` unchanged. No IPC right was copied,
+no GFX command was submitted, and the device did not reboot during this run.
+
+## IPC Census v4 Build
+
+The v4 IPA preserves the device-validated v3 traversal and gives exact matches
+their own 16-line cap, independent of the 64-line generic-candidate cap. Each
+`MATCH` record includes the table index, entry and object header bits, port,
+wrapper, object, runtime vtable, and unslid vtable. The summary separately
+reports `match-logged` and `match-truncated`. Package inspection confirms these
+markers and the explicit pre-copy stop in the built Titan binary. Device
+confirmation of the two detailed match records is pending.
 
 ## End-to-End Chain Status
 
@@ -278,7 +310,7 @@ Primary layout references:
 | iOS 26 Titan kernel/GFX anchors | **STATIC PASS** | Adapted unique anchors resolve; legacy patterns fail as expected |
 | TXM and SPTM anchors | **STATIC PASS** | Inspected trust-cache, PAPT, frame-table, and argument relationships resolve |
 | Kernel read/write exploit primitive | **PASS; EXACT-READ ADAPTER VALIDATED** | ClearSword validated the live kernel header and all small-zone eight-byte reads completed without panic |
-| Titan unrestricted physical write | **NOT REACHED / IPC CENSUS V3 BUILT** | IORVBAR, `backboardd`, and the table decode passed; packaged v3 replaces the obsolete port-state gate with stable XNU 12377 entry/object decoding, while IPC entry copy and GFX submission remain blocked |
+| Titan unrestricted physical write | **NOT REACHED / IPC CENSUS V3 DEVICE PASS; V4 BUILT** | IORVBAR, `backboardd`, and the stable table decode passed; v3 found two exact IOGPU user-client objects, and packaged v4 exposes their indices while IPC entry copy and GFX submission remain blocked |
 | SPTM/PAPT and Stage-2 contract | **NO SHORTCUT / TYPED STAGE-2 CONTRACT MAPPED** | Table 0 and the `0x1f/0x20` lifecycle are statically resolved, but they add protected frame, VMID, and state-transition gates and do not satisfy Dopamine's physical-write bypass contract |
 | Bootstrap, trust-cache, and jailbreak services | **NOT REACHED** | Depend on runtime confirmation of the selected kernel primitive and an A15 SPTM/TXM path |
 | A15/iOS 26 support declaration | **EXACT PROBE ONLY** | Titan metadata includes only iPhone14,2 build 23A355; normal support remains false |

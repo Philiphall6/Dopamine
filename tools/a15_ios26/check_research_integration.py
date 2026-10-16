@@ -254,8 +254,8 @@ def main() -> int:
         "standard IOSurface is not released",
     )
     require(
-        "ACTIVE_TITAN_PROBE_IPC_CENSUS_V3_BUILT" in report,
-        "report does not record the IPC census v3 build state",
+        "ACTIVE_TITAN_PROBE_IPC_CENSUS_V4_BUILT" in report,
+        "report does not record the IPC census v4 build state",
     )
     for marker in ("iokit.IOMachPort", "clearsword_kreadbuf", "[+0x08,+0x28)"):
         require(marker in report, f"report is missing active-device panic evidence: {marker}")

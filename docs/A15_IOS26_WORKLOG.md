@@ -491,8 +491,24 @@ or GFX submission. GitHub Actions run `38871258849` built source commit
 `30579d2c1b3cb32b2697be95fea188e91ed3806a` successfully, and package
 inspection confirmed the v3 markers plus the explicit pre-copy stop. The
 resulting `Dopamine-A15-iOS26-ipc-census-v3-30579d2.ipa` has SHA-256
-`74EBB99892BDD649957748B64A31B05E07E07025686F3B2B3C6A57D5491C122B`;
-device confirmation is pending.
+`74EBB99892BDD649957748B64A31B05E07E07025686F3B2B3C6A57D5491C122B`.
+
+The exact target ran this v3 build on 2026-10-16. The table decode was stable:
+`0xc000` bytes, 2,048 complete entries, 1,649 entries with rights, zero
+unstable snapshots, and stable final table/PID checks. The modern header split
+produced 547 state-1 and 1,102 state-2 objects. Type `36` contained 85
+`IOMachPort` wrappers and exactly two objects with the expected IOGPU
+user-client vtable. The census stopped before IPC right copy and GFX
+submission, and the device did not reboot. Because both exact matches occurred
+after the 64-line generic-candidate cap, the follow-up v4 source adds a separate
+bounded `MATCH` marker while preserving the same read-only execution boundary.
+GitHub Actions run `38879780175` built source commit
+`d55d66724ba09d82727f97d106de1ff740fcdeb3` successfully. Package inspection
+confirmed `ipc-census-v4`, the exact `MATCH` records and counters, and the
+explicit pre-copy stop. The resulting
+`Dopamine-A15-iOS26-ipc-census-v4-d55d667.ipa` is 55,473,398 bytes with
+SHA-256 `1F518E8F11F3815E896B51FDCA632C98F805304C435C59BF209D27F656BB36AB`.
+Device confirmation of the detailed match records is pending.
 
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
