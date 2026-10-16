@@ -23,11 +23,11 @@ segment registration plus the downstream protected frame-type policy.
 
 ## Latest Build Evidence
 
-- Source commit: `bfd9c4f2752422ce2001c1842bf401f552e98a7b`
-- GitHub Actions run: `38881947358` (`PASS`, 8m 18s)
-- IPA: `Dopamine-A15-iOS26-ipc-profile-v5-bfd9c4f.ipa`
-- Size: `55,474,513` bytes
-- SHA-256: `97C911785BAD3E78417AAFF8EA3E4B62528CE53A008ECC89B9D6F536356E96E9`
+- Source commit: `79b75bb81b4fc3e8f5a112c8d3a1b924e0cfff67`
+- GitHub Actions run: `38887531277` (`PASS`, 12m 6s)
+- IPA: `Dopamine-A15-iOS26-ipc-profile-v5-guard-79b75bb.ipa`
+- Size: `55,474,629` bytes
+- SHA-256: `9A423151A27EBAFC2C3C4E4F0942886B95FC51928E592501F80EE01F60F8F752`
 - Package check: `Payload/Dopamine.app/Dopamine`, app `Info.plist`, and
   `Frameworks/Titan.framework/Titan` and
   `Frameworks/ClearSword.framework/ClearSword` are present.
@@ -41,12 +41,20 @@ entry and decoder both identify revision `ipc-census-v5`. The binary records
 `ie-bits`, `io-type`, `io-state`, stable-entry counters, dedicated exact-match
 counters, and profile-completion counters, and no longer contains the old
 exact-target `old-type` marker. It retains the explicit
-`task_copy_ipc_entry not reached` stop marker. Source
-inspection and the integration checker confirm that the
+`task_copy_ipc_entry not reached` stop marker. The packaged Titan framework
+also contains the Darwin 25 refusal marker added at the start of the legacy
+copy routine. Source inspection and the integration checker confirm that the
 census remains read-only and requires stable complete entry snapshots before
 and after following an object. The iOS 26 patchfinder still reports the
 rejected primary `IOMemoryMap::fAddress` match as an expected accessor-pattern
 retry, rather than as a false error.
+
+This guard build was not installed on the device because it does not advance
+the active probe. It preserves the exact v5 read-only stop and adds a second
+defense that rejects iOS 26 or XNU 12377 before the first legacy target-port
+read or any write. The public Calif/Hexacon iOS 27 demonstration is tracked
+separately in `docs/CALIF_HEXACON_IOS27_SIGNAL.md`; no public technical detail
+currently connects it to Titan, backboardd IPC transfer, or this A15 route.
 
 ## First Active Device Result
 

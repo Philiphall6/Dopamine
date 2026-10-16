@@ -546,6 +546,22 @@ remains blocked. A defense-in-depth gate was also added at the start of
 `task_copy_ipc_entry`: iOS 26 or XNU major 12377 and later returns before the
 first legacy target-port read or write.
 
+GitHub Actions run `38887531277` built the guarded v5 source at commit
+`79b75bb81b4fc3e8f5a112c8d3a1b924e0cfff67` successfully. Package inspection
+confirmed the existing `ipc-census-v5`, `PROFILE-COMPARE`, and explicit
+pre-copy stop markers, plus the new Darwin 25 legacy-copy refusal in
+`Frameworks/Titan.framework/Titan`. The resulting
+`Dopamine-A15-iOS26-ipc-profile-v5-guard-79b75bb.ipa` is 55,474,629 bytes with
+SHA-256 `9A423151A27EBAFC2C3C4E4F0942886B95FC51928E592501F80EE01F60F8F752`.
+No device run is required for this source-only guard.
+
+A same-day Calif/Hexacon demonstration reportedly showed a private untethered
+jailbreak on iPhone 18 Pro with iOS 27.0.1. The public conference page confirms
+Calif's opening keynote but currently publishes no chain details, artifacts,
+or SPTM/TXM mechanism. `docs/CALIF_HEXACON_IOS27_SIGNAL.md` records the signal,
+its provenance, and the unanswered questions. It does not change the current
+A15 route.
+
 Dataflow Forensics' less-indexed public `SPTM - The Last Bits` post independently
 identifies UAT as dispatch table `7` on iOS 26 and explains that calls use the
 `0x70000000#` family. Its earlier iOS 17 round-two post records UAT as subsystem

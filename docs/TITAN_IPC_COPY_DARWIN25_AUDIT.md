@@ -124,3 +124,15 @@ transfer mechanism. The next safe step is continued offline XNU control-flow
 analysis or another read-only probe designed from a specific unresolved field;
 it is not execution of the historical copy routine.
 
+## Guard Build Verification
+
+Commit `79b75bb81b4fc3e8f5a112c8d3a1b924e0cfff67` adds the defensive runtime
+gate described above. GitHub Actions run `38887531277` completed successfully.
+The packaged `Titan.framework/Titan` contains both the existing
+`task_copy_ipc_entry not reached` marker and the new Darwin 25 refusal string.
+The resulting IPA is
+`Dopamine-A15-iOS26-ipc-profile-v5-guard-79b75bb.ipa`, 55,474,629 bytes,
+SHA-256 `9A423151A27EBAFC2C3C4E4F0942886B95FC51928E592501F80EE01F60F8F752`.
+It was not installed because the change is a source-level safety barrier, not
+a new device probe.
+
