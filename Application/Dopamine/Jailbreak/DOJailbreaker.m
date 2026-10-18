@@ -36,8 +36,10 @@
 #import <mach-o/dyld.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
+#import <sys/mman.h>
 #import <fcntl.h>
 #import <errno.h>
+#import <string.h>
 #import <unistd.h>
 #import "spawn.h"
 #import "clock_alarm.h"
@@ -96,6 +98,136 @@ static void A15ActiveProbeCheckpoint(NSString *stage, NSString *status, NSString
 
     NSString *line = [NSString stringWithFormat:@"[A15ACTIVE] %@ %@ %@", stage, status, detail ?: @""];
     [[DOUIManager sharedInstance] sendLog:line debug:NO];
+}
+
+typedef int (*A15ExactKernelRead)(uint64_t address, void *output, size_t size);
+typedef int (*A15ExactKernelWrite)(uint64_t address, const void *input, size_t size);
+
+static BOOL A15ProbeSelfPageKernelWrite(DOExploit *kernelExploit, uint64_t safeTarget)
+{
+    if (![[DOEnvironmentManager sharedManager] isA15IOS2601ResearchTarget] ||
+        ![kernelExploit.executablePath.lastPathComponent isEqualToString:@"ClearSword"]) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"BLOCKED", @"exact target and ClearSword required");
+        return NO;
+    }
+
+    A15ExactKernelRead exactRead = (A15ExactKernelRead)[kernelExploit resolveSymbol:"clearsword_kreadbuf_exact"];
+    A15ExactKernelWrite exactWrite = (A15ExactKernelWrite)[kernelExploit resolveSymbol:"clearsword_kwritebuf_exact"];
+    if (!exactRead || !exactWrite || vm_real_kernel_page_size != 0x4000) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"BLOCKED", @"strict ClearSword symbols and 16K pages required");
+        return NO;
+    }
+
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"START", @"app-owned 16K page, one 0x20 mutation plus restoration");
+    vm_address_t page = 0;
+    if (vm_allocate(mach_task_self(), &page, 0x4000, VM_FLAGS_ANYWHERE) != KERN_SUCCESS) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"FAIL", @"app-owned page allocation failed");
+        return NO;
+    }
+
+    BOOL passed = NO;
+    BOOL locked = NO;
+    BOOL aliasTargeted = NO;
+    uint8_t *userBytes = (uint8_t *)(uintptr_t)(page + 0x100);
+    uint8_t original[0x20];
+    uint8_t changed[0x20];
+    uint8_t observed[0x20] = {0};
+    uint64_t physical = 0;
+    uint64_t kernelAlias = 0;
+    int result = 0;
+
+    for (size_t i = 0; i < sizeof(original); i++) {
+        original[i] = (uint8_t)(0x31 + i);
+        changed[i] = (uint8_t)(original[i] ^ 0xa5);
+    }
+    memcpy(userBytes, original, sizeof(original));
+    if (mlock((void *)(uintptr_t)page, 0x4000) != 0) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"BLOCKED",
+            [NSString stringWithFormat:@"app-owned page could not be pinned errno=%d", errno]);
+        goto cleanup;
+    }
+    locked = YES;
+
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.prepare", @"START", @"translate pinned app page and validate alias before writing");
+    physical = vtophys(ttep_self(), (uint64_t)(uintptr_t)userBytes);
+    kernelAlias = physical ? phystokv(physical) : 0;
+    if (!physical || !kernelAlias || (kernelAlias & 0x1f) != 0) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"BLOCKED", @"page translation or alias alignment failed");
+        goto cleanup;
+    }
+
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.alias-read", @"START", @"0x20 pre-write read from derived kernel alias");
+    aliasTargeted = YES;
+    result = exactRead(kernelAlias, observed, sizeof(observed));
+    if (result != 0 || memcmp(observed, original, sizeof(original)) != 0) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"BLOCKED",
+            [NSString stringWithFormat:@"pre-write alias identity failed read=%d", result]);
+        goto cleanup;
+    }
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.prepare", @"PASS",
+        [NSString stringWithFormat:@"app-page=0x%llx physical=0x%llx kernel-alias=0x%llx bytes=0x20",
+            (unsigned long long)page, (unsigned long long)physical, (unsigned long long)kernelAlias]);
+
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.attempt", @"START", @"one 0x20 kernel-alias write to app-owned page");
+    result = exactWrite(kernelAlias, changed, sizeof(changed));
+    if (result != 0) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page.attempt", @"FAIL",
+            [NSString stringWithFormat:@"write syscall returned %d; no memory change inferred", result]);
+        goto cleanup;
+    }
+
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.observe", @"START", @"read back both kernel and app aliases");
+    result = exactRead(kernelAlias, observed, sizeof(observed));
+    if (result != 0 || memcmp(observed, changed, sizeof(changed)) != 0 ||
+        memcmp(userBytes, changed, sizeof(changed)) != 0) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page.observe", @"FAIL",
+            [NSString stringWithFormat:@"dual-alias readback mismatch read=%d", result]);
+        goto cleanup;
+    }
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.observe", @"PASS",
+        @"0x20 bytes changed through kernel alias and independently match app mapping");
+
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.restore", @"START", @"restore original 0x20 bytes");
+    result = exactWrite(kernelAlias, original, sizeof(original));
+    if (result != 0 || exactRead(kernelAlias, observed, sizeof(observed)) != 0 ||
+        memcmp(observed, original, sizeof(original)) != 0 ||
+        memcmp(userBytes, original, sizeof(original)) != 0) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page.restore", @"FAIL",
+            [NSString stringWithFormat:@"strict restore or readback failed write=%d", result]);
+        goto cleanup;
+    }
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.restore", @"PASS", @"original bytes verified through both aliases");
+    passed = YES;
+
+cleanup:
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page.cleanup", @"START", @"restore app bytes, redirect ClearSword, then release owned page");
+    memcpy(userBytes, original, sizeof(original));
+    if (aliasTargeted) {
+        uint8_t safeRead[0x20] = {0};
+        uint64_t safeMagic = 0;
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page.redirect", @"START", @"move ClearSword socket off the temporary page");
+        int redirectResult = exactRead(safeTarget, safeRead, sizeof(safeRead));
+        memcpy(&safeMagic, safeRead, sizeof(safeMagic));
+        if (redirectResult != 0 || safeMagic != 0x100000cfeedfacfULL) {
+            A15ActiveProbeCheckpoint(@"kernel-write.self-page.redirect", @"FAIL",
+                [NSString stringWithFormat:@"read=%d magic=0x%llx; pinned page retained", redirectResult,
+                    (unsigned long long)safeMagic]);
+            A15ActiveProbeCheckpoint(@"kernel-write.self-page", @"STOP",
+                @"socket target uncertain; temporary page retained until process exit");
+            return NO;
+        }
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page.redirect", @"PASS", @"socket now targets stable kernel header");
+    }
+    int unlockResult = locked ? munlock((void *)(uintptr_t)page, 0x4000) : 0;
+    kern_return_t deallocateResult = vm_deallocate(mach_task_self(), page, 0x4000);
+    if (unlockResult != 0 || deallocateResult != KERN_SUCCESS) {
+        A15ActiveProbeCheckpoint(@"kernel-write.self-page.cleanup", @"FAIL",
+            [NSString stringWithFormat:@"munlock=%d vm_deallocate=0x%x", unlockResult, deallocateResult]);
+        passed = NO;
+    }
+    A15ActiveProbeCheckpoint(@"kernel-write.self-page", passed ? @"PASS" : @"STOP",
+        passed ? @"app-owned page kernel-alias write only; no physical write or protected-memory change" : @"stopped before Titan; inspect prior checkpoint and cleanup result");
+    return passed;
 }
 
 typedef CFTypeRef (*A15SecTaskCreateFromSelfFn)(CFAllocatorRef allocator);
@@ -298,6 +430,71 @@ static void A15RunHypervisorPreflight(void)
     A15ActiveProbeCheckpoint(@"hypervisor.preflight", @"STOP", @"read-only; no hv_* function or IOKit user-client open invoked");
 }
 
+static void A15RunAGXServiceCensus(void)
+{
+    A15ActiveProbeCheckpoint(@"agx.registry", @"START", @"IOService-plane class/provider census; read-only");
+    io_iterator_t iterator = IO_OBJECT_NULL;
+    kern_return_t result = IORegistryCreateIterator(kIOMainPortDefault,
+        kIOServicePlane, kIORegistryIterateRecursively, &iterator);
+    if (result != KERN_SUCCESS) {
+        A15ActiveProbeCheckpoint(@"agx.registry", @"FAIL",
+            [NSString stringWithFormat:@"iterator-kr=0x%x", result]);
+        return;
+    }
+
+    uint32_t scanned = 0;
+    uint32_t matches = 0;
+    uint32_t base = 0;
+    uint32_t a0 = 0;
+    uint32_t logged = 0;
+    uint32_t classFailures = 0;
+    io_registry_entry_t entry = IO_OBJECT_NULL;
+    while (scanned < 8192 && (entry = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+        scanned++;
+        io_name_t className = {0};
+        if (IOObjectGetClass(entry, className) != KERN_SUCCESS) {
+            classFailures++;
+            IOObjectRelease(entry);
+            continue;
+        }
+        if (strncmp(className, "AGXAccelerator", strlen("AGXAccelerator")) == 0) {
+            matches++;
+            if (strcmp(className, "AGXAcceleratorG14P") == 0) base++;
+            if (strcmp(className, "AGXAcceleratorG14P_A0") == 0) a0++;
+            if (logged < 32) {
+                io_name_t name = {0};
+                io_name_t parentName = {0};
+                io_name_t parentClass = {0};
+                uint64_t registryID = 0;
+                uint64_t parentID = 0;
+                IORegistryEntryGetName(entry, name);
+                IORegistryEntryGetRegistryEntryID(entry, &registryID);
+                io_registry_entry_t parent = IO_OBJECT_NULL;
+                kern_return_t parentResult = IORegistryEntryGetParentEntry(entry, kIOServicePlane, &parent);
+                if (parentResult == KERN_SUCCESS && parent != IO_OBJECT_NULL) {
+                    IORegistryEntryGetName(parent, parentName);
+                    IOObjectGetClass(parent, parentClass);
+                    IORegistryEntryGetRegistryEntryID(parent, &parentID);
+                    IOObjectRelease(parent);
+                }
+                A15ActiveProbeCheckpoint(@"agx.registry-match", @"INFO",
+                    [NSString stringWithFormat:@"id=0x%llx name=%s class=%s parent-id=0x%llx parent-name=%s parent-class=%s parent-kr=0x%x",
+                     (unsigned long long)registryID, name, className,
+                     (unsigned long long)parentID, parentName, parentClass, parentResult]);
+                logged++;
+            }
+        }
+        IOObjectRelease(entry);
+    }
+    boolean_t iteratorValid = IOIteratorIsValid(iterator);
+    IOObjectRelease(iterator);
+    A15ActiveProbeCheckpoint(@"agx.registry", @"SUMMARY",
+        [NSString stringWithFormat:@"scanned=%u matches=%u base=%u a0=%u logged=%u truncated=%u class-failures=%u complete=%@ iterator-valid=%@",
+         scanned, matches, base, a0, logged, matches - logged, classFailures,
+         scanned < 8192 ? @"yes" : @"no", iteratorValid ? @"yes" : @"no"]);
+    A15ActiveProbeCheckpoint(@"agx.registry", @"STOP", @"census only; no user-client open, command submission, MMIO, or kernel write in this stage");
+}
+
 - (NSError *)gatherSystemInformation
 {
     NSString *kernelPath = [[DOEnvironmentManager sharedManager] accessibleKernelPath];
@@ -472,8 +669,9 @@ static void A15RunHypervisorPreflight(void)
 
     NSString *runID = NSUUID.UUID.UUIDString;
     setenv("A15_ACTIVE_PROBE_RUN_ID", runID.UTF8String, 1);
-    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=self-gpu-client-v4+rtkit-mmio-disabled-v1");
+    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=self-page-write-v1+agx-map-metadata-v1+rtkit-mmio-disabled-v1");
 
+    A15RunAGXServiceCensus();
     A15RunHypervisorPreflight();
 
     A15ActiveProbeCheckpoint(@"xpf.gather", @"START", @"");
@@ -526,6 +724,15 @@ static void A15RunHypervisorPreflight(void)
         return;
     }
     A15ActiveProbeCheckpoint(@"kernel.primitive", @"PASS", kernelDetail);
+
+    if (!A15ProbeSelfPageKernelWrite(kernelExploit, kernelBase)) {
+        NSError *cleanupError = [self cleanUpExploits];
+        A15ActiveProbeCheckpoint(@"probe.cleanup", cleanupError ? @"FAIL" : @"PASS", cleanupError.localizedDescription ?: @"");
+        *errOut = [NSError errorWithDomain:JBErrorDomain code:JBErrorCodeFailedExploitation userInfo:@{
+            NSLocalizedDescriptionKey: @"Bounded app-page kernel write diagnostic stopped. Inspect the persisted kernel-write.self-page checkpoints."
+        }];
+        return;
+    }
 
     A15ActiveProbeCheckpoint(@"titan.load", @"START", titan.displayName);
     if ([titan load] != 0) {
