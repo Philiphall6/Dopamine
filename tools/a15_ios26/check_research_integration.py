@@ -65,7 +65,7 @@ def main() -> int:
     with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
         app_info = plistlib.load(stream)
     require(app_info.get("A15ProbeRevision") ==
-            "self-page-write-v1+agx-packet-route-identity-v1+rtkit-mmio-disabled-v1",
+            "self-page-write-v1+agx-zero-packet-observe-v1+rtkit-mmio-disabled-v1",
             "app Info.plist does not identify the MMIO-disabled revision")
     require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
             "app Info.plist does not expose the MMIO safety mode")
@@ -504,7 +504,7 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=self-page-write-v1+agx-packet-route-identity-v1+rtkit-mmio-disabled-v1" in jailbreaker,
+        "revision=self-page-write-v1+agx-zero-packet-observe-v1+rtkit-mmio-disabled-v1" in jailbreaker,
         "active probe entry does not identify the MMIO-disabled build",
     )
     queue_probe_start = titan.find('titan_checkpoint(@"titan.self-gpu.queue-selector", @"START"')
@@ -615,14 +615,16 @@ def main() -> int:
     backend_slot_start = titan.find("static bool titan_probe_backend_code_slot(")
     backend_start = titan.find("static int titan_probe_backend_identity(uint64_t device)")
     packet_route_start = titan.find("static int titan_probe_packet_route_identity(")
+    zero_packet_start = titan.find("static int titan_probe_zero_packet_once(")
     shared_end = titan.find("static int titan_resolve_ios26_iorvbar_mapping(void)",
                             shared_start)
-    require(0 <= backend_slot_start < backend_start < packet_route_start <
+    require(0 <= backend_slot_start < backend_start < packet_route_start < zero_packet_start <
             owned_queue_start < shared_start < shared_end,
             "bounded own-client alias probe is missing")
     slot_body = titan[backend_slot_start:backend_start]
     backend_body = titan[backend_start:packet_route_start]
-    packet_route_body = titan[packet_route_start:owned_queue_start]
+    packet_route_body = titan[packet_route_start:zero_packet_start]
+    zero_packet_body = titan[zero_packet_start:owned_queue_start]
     for marker in (
         "kIOS2601AGXBlockFenceMetaGlobal = 0xfffffff00ab5d6d0ULL",
         "kIOS2601AGXBlockFenceMetaVtable = 0xfffffff007b16de0ULL",
@@ -681,6 +683,41 @@ def main() -> int:
             packet_route_body.find('titan.packet-route-identity.stability') <
             packet_route_body.find('titan.packet-route-identity", @"PASS"'),
             "packet route identity gates are missing or out of order")
+    for marker in (
+        'titan.zero-packet.buffer-preflight',
+        'titan.zero-packet.pool-before-repeat',
+        'titan.zero-packet.preflight-stability',
+        'const uint64_t scalarInput[4] = { queueID, 0, 1, 56 };',
+        'uint8_t structureInput[56] = {0};',
+        'IOConnectCallMethod(connection, 25,',
+        'titan.zero-packet.pool-after-repeat',
+        'titan.zero-packet.queue-after-repeat',
+        'titan.zero-packet.cleanup-state',
+        'titan.zero-packet.command-buffer-final',
+        'titan.zero-packet.firmware-final',
+        'titan.zero-packet.buffer-final',
+        'titan.zero-packet.postflight',
+        '@"attempts=1; connection cleanup follows"',
+    ):
+        require(marker in zero_packet_body,
+                f"zero-packet observation is missing: {marker}")
+    for forbidden in ("IOGPU_submit_command_buffers(", "gfx_reset(",
+                      "task_copy_ipc_entry(", "kwrite", "kmap(",
+                      "IOServiceOpen("):
+        require(forbidden not in zero_packet_body,
+                f"zero-packet observation contains forbidden call: {forbidden}")
+    require(zero_packet_body.count('IOConnectCallMethod(connection, 25,') == 1 and
+            zero_packet_body.count('IOConnectCallMethod') == 1,
+            "zero-packet observation must issue selector 25 exactly once")
+    require(0 <= zero_packet_body.find('titan.zero-packet.buffer-preflight') <
+            zero_packet_body.find('titan.zero-packet.pool-before') <
+            zero_packet_body.find('titan.zero-packet.preflight-stability') <
+            zero_packet_body.find('IOConnectCallMethod(connection, 25,') <
+            zero_packet_body.find('titan.zero-packet.pool-after') <
+            zero_packet_body.find('titan.zero-packet.cleanup-state') <
+            zero_packet_body.find('titan.zero-packet.postflight') <
+            zero_packet_body.find('titan.zero-packet", complete ? @"PASS"'),
+            "zero-packet preflight, one call, and postflight are out of order")
     owned_queue_body = titan[owned_queue_start:shared_start]
     for marker in (
         'kIOS2601AGXCommandQueueVtable = 0xfffffff007b17550ULL',
@@ -704,6 +741,7 @@ def main() -> int:
         'titan.own-queue.firmware-read',
         'if (titan_probe_backend_identity(device) != 0)',
         'if (titan_probe_packet_route_identity(queue, device, firmware, rawVtable) != 0)',
+        'if (titan_probe_zero_packet_once(connection, queue, device, firmware,',
     ):
         require(marker in titan, f"owned queue probe is missing: {marker}")
     for forbidden in ("IOGPU_submit_command_buffers(", "gfx_reset(",
@@ -725,6 +763,7 @@ def main() -> int:
             owned_queue_body.find('titan.own-queue.firmware-read", @"PASS"') <
             owned_queue_body.find('if (titan_probe_backend_identity(device) != 0)') <
             owned_queue_body.find('if (titan_probe_packet_route_identity(queue, device, firmware, rawVtable) != 0)') <
+            owned_queue_body.find('if (titan_probe_zero_packet_once(connection, queue, device, firmware,') <
             owned_queue_body.find('titan.own-queue", @"PASS"'),
             "firmware and backend identity reads must follow same-client gate and precede bounded stop")
     shared_body = titan[shared_start:shared_end]

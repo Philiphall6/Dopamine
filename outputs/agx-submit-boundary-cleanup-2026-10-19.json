@@ -1,0 +1,279 @@
+{
+  "backend_call_dominates_parser_call": true,
+  "backend_failure_branch_skips_parser": true,
+  "backend_success_gate_dominates_parser_call": true,
+  "batch_instruction_count": 155,
+  "build": "23A355",
+  "candidate_agx_backend": {
+    "cleanup_contract": {
+      "final_release_before_selector_return_proven": false,
+      "first_pool_pointer_clear_dominates_second_stage": true,
+      "free_override": "0xfffffff0087f60d8",
+      "normal_return_local_release_covered": true,
+      "normal_return_release_sites": [
+        "0xfffffff009f497cc",
+        "0xfffffff009f49864"
+      ],
+      "pool_backing_clear_sites": [
+        "0xfffffff0087f619c",
+        "0xfffffff0087f6258"
+      ],
+      "pool_bitmap_restore_sites": [
+        "0xfffffff0087f6158",
+        "0xfffffff0087f6168",
+        "0xfffffff0087f6214",
+        "0xfffffff0087f6224"
+      ],
+      "release_core_dispatches_virtual_free": true,
+      "second_pool_pointer_clear_dominates_final_stage": true,
+      "vtable_entries": [
+        {
+          "address": "0xfffffff007b16d48",
+          "decoded_static_target": "0xfffffff0085fb0f0",
+          "encoded": "0x80113a87015f70f0",
+          "label": "agx-block-fence-release"
+        },
+        {
+          "address": "0xfffffff007b16d70",
+          "decoded_static_target": "0xfffffff0085fae84",
+          "encoded": "0x8011be60015f6e84",
+          "label": "agx-block-fence-tagged-release"
+        },
+        {
+          "address": "0xfffffff007b16d78",
+          "decoded_static_target": "0xfffffff0085fad24",
+          "encoded": "0x801132e5015f6d24",
+          "label": "agx-block-fence-release-core"
+        },
+        {
+          "address": "0xfffffff007b16d90",
+          "decoded_static_target": "0xfffffff0087f60d8",
+          "encoded": "0x8011edc5017f20d8",
+          "label": "agx-block-fence-free"
+        }
+      ]
+    },
+    "complete_effects_bounded": false,
+    "excluded_local_rollback_writes": [
+      "0xfffffff0087f5fac",
+      "0xfffffff0087f5fbc",
+      "0xfffffff0087f5ff4",
+      "0xfffffff0087f606c",
+      "0xfffffff0087f607c",
+      "0xfffffff0087f60b0"
+    ],
+    "indirect_call_dominates_return": true,
+    "object_state_write_dominates_return": true,
+    "possible_pool_reservation_return_without_local_rollback": true,
+    "prepare_instruction_count": 268,
+    "reachable_conditional_pool_write_sites": [
+      "0xfffffff0087f5d34",
+      "0xfffffff0087f5dc4",
+      "0xfffffff0087f5e44",
+      "0xfffffff0087f5edc"
+    ],
+    "retention_path_sites": [
+      "0xfffffff0087f5d34",
+      "0xfffffff0087f5d68",
+      "0xfffffff0087f5e44",
+      "0xfffffff0087f5e78",
+      "0xfffffff0087f5e84"
+    ],
+    "runtime_object_identity_observed": false,
+    "static_metaclass_chain": {
+      "allocate_slot": "0xfffffff007b16e48",
+      "class_name": "AGXBlockFence",
+      "class_size": "0x158",
+      "instance_vtable": "0xfffffff007b16d20",
+      "metaclass_global": "0xfffffff00ab5d6d0",
+      "metaclass_vtable": "0xfffffff007b16de0",
+      "prepare_slot": "0xfffffff007b16db0",
+      "runtime_object_identity_observed": false
+    },
+    "static_vtable_entries": [
+      {
+        "address": "0xfffffff007b1e690",
+        "decoded_static_target": "0xfffffff0087e4280",
+        "encoded": "0x8011419a017e0280",
+        "label": "agx-block-fence-factory"
+      },
+      {
+        "address": "0xfffffff007b16e48",
+        "decoded_static_target": "0xfffffff0087f630c",
+        "encoded": "0x80411601017f230c",
+        "label": "agx-block-fence-allocate"
+      },
+      {
+        "address": "0xfffffff007b16db0",
+        "decoded_static_target": "0xfffffff0087f5ca8",
+        "encoded": "0x80115c71017f1ca8",
+        "label": "agx-block-fence-prepare"
+      }
+    ],
+    "statically_resolved_base_helper": {
+      "iogpu_got": "0xfffffff007e40920",
+      "kernel_target_returns_one": true,
+      "stateful_success_path_sites": [
+        "0xfffffff009f21c04",
+        "0xfffffff009f21c0c",
+        "0xfffffff009f21c14",
+        "0xfffffff009f21c18",
+        "0xfffffff009f21c20"
+      ],
+      "static_kernel_target": "0xfffffff0085fad18",
+      "static_table": "0xfffffff007aeee60",
+      "table_slot": "0xfffffff007aeeed8",
+      "virtual_call_dominates_helper_return": true
+    },
+    "statically_resolved_base_initializer": {
+      "agx_got": "0xfffffff007b15d20",
+      "conditional_state_allocation_and_callback_sites": [
+        "0xfffffff009f21f38",
+        "0xfffffff009f21f60",
+        "0xfffffff009f21f6c",
+        "0xfffffff009f21f70",
+        "0xfffffff009f21fd0",
+        "0xfffffff009f21fe0"
+      ],
+      "helper_call_dominates_return": true,
+      "instruction_count": 66,
+      "static_table": "0xfffffff007e439e8",
+      "static_target": "0xfffffff009f21f00",
+      "table_slot": "0xfffffff007e43a88"
+    }
+  },
+  "image_sha256": "8867208c59bfa426611c36fcfe570ffc41cc75ee293472fe7197860d0c5223f1",
+  "limits": "Static submit route plus observed queue/device identity only; local release and the final free routine are pinned, but final deallocation timing and complete packet effects are not observed.",
+  "mode": "offline-static-normal-return-paths",
+  "observed_queue_packet_route": {
+    "all_zero_header_command_dispatch_skipped": true,
+    "all_zero_header_complete_effects_bounded": false,
+    "all_zero_header_finalizer_target": "0xfffffff009f49d44",
+    "all_zero_header_uses_empty_record_path": true,
+    "base_packet_slot": "0xfffffff007e46c50",
+    "base_packet_target": "0xfffffff009f4be9c",
+    "base_table": "0xfffffff007e46b28",
+    "observed_queue_entries": [
+      {
+        "address": "0xfffffff007b17668",
+        "decoded_static_target": "0xfffffff008803254",
+        "encoded": "0x80119dcc017ff254",
+        "label": "observed-queue-packet-override"
+      },
+      {
+        "address": "0xfffffff007b176b0",
+        "decoded_static_target": "0xfffffff0087ff07c",
+        "encoded": "0x80415880017fb07c",
+        "label": "observed-queue-precheck"
+      },
+      {
+        "address": "0xfffffff007b175f8",
+        "decoded_static_target": "0xfffffff009f49d44",
+        "encoded": "0x801133b802f45d44",
+        "label": "observed-queue-empty-finalizer"
+      }
+    ],
+    "old_selector_0_batch_target": "0xfffffff009f49254",
+    "old_selector_0_entries": [
+      {
+        "address": "0xfffffff007e429b8",
+        "decoded_static_target": "0xfffffff009f1c684",
+        "encoded": "0x8030705d02f18684",
+        "label": "selector-0-mode-clear"
+      },
+      {
+        "address": "0xfffffff007e42b08",
+        "decoded_static_target": "0xfffffff009f1c684",
+        "encoded": "0x8030705d02f18684",
+        "label": "selector-0-mode-set"
+      }
+    ],
+    "old_selector_runtime_reachability_observed": false,
+    "override_pre_base_sites": [
+      "0xfffffff00880329c",
+      "0xfffffff0088032d0",
+      "0xfffffff0088032d4",
+      "0xfffffff0088032d8",
+      "0xfffffff0088032ec"
+    ],
+    "parser_only_alternate_route_established": false
+  },
+  "parser_only_selector25_device_test_bounded": false,
+  "process_instruction_count": 197,
+  "queue_state_write_dominates_process_call": true,
+  "static_command_buffer_callback": {
+    "callback_downstream_virtual_call": "0xfffffff0087fd4c4",
+    "callback_state_write_sites": [
+      "0xfffffff0087fd33c",
+      "0xfffffff0087fd390",
+      "0xfffffff0087fd3d0",
+      "0xfffffff0087fd43c",
+      "0xfffffff0087fd450",
+      "0xfffffff0087fd4cc"
+    ],
+    "class_size": "0x17c0",
+    "complete_effects_bounded": false,
+    "initializer_device_field": "+0x18",
+    "queue_field": "+0x670",
+    "runtime_object_identity_observed": false,
+    "static_class_name": "AGXCommandBuffer",
+    "vtable_entries": [
+      {
+        "address": "0xfffffff007b17488",
+        "decoded_static_target": "0xfffffff0087fdd84",
+        "encoded": "0x8011dc61017f9d84",
+        "label": "queue-command-buffer-initializer"
+      },
+      {
+        "address": "0xfffffff007b174a8",
+        "decoded_static_target": "0xfffffff0087fd300",
+        "encoded": "0x80419583017f9300",
+        "label": "queue-command-buffer-callback"
+      }
+    ]
+  },
+  "static_firmware_callback_candidate": {
+    "abstract_parent_allocator_returns_null": true,
+    "base_callback_symbol": "__cxa_pure_virtual",
+    "base_vtable_entries": [
+      {
+        "address": "0xfffffff007b1e950",
+        "decoded_static_target": "0xfffffff008857b14",
+        "encoded": "0x80116c7201853b14",
+        "label": "device-firmware-factory"
+      },
+      {
+        "address": "0xfffffff007b1e928",
+        "decoded_static_target": "0xfffffff0088507f4",
+        "encoded": "0x801154270184c7f4",
+        "label": "post-store-device-method"
+      },
+      {
+        "address": "0xfffffff007b18e38",
+        "decoded_static_target": "0xfffffff008849f38",
+        "encoded": "0x8041160101845f38",
+        "label": "abstract-firmware-parent-allocator"
+      },
+      {
+        "address": "0xfffffff007b1a560",
+        "decoded_static_target": "0xfffffff00884b540",
+        "encoded": "0x8041160101847540",
+        "label": "firmware-metaclass-allocator"
+      },
+      {
+        "address": "0xfffffff007b19068",
+        "decoded_static_target": "0xfffffff008634720",
+        "encoded": "0x8011925001630720",
+        "label": "firmware-base-callback"
+      }
+    ],
+    "class_size": "0x1be0",
+    "device_field": "+0x4a0",
+    "effective_callback_target_resolved": false,
+    "immediate_post_store_call_receives_device": true,
+    "runtime_field_object_and_final_vtable_observed": false,
+    "static_class_name": "AGXArmFirmwareASC",
+    "static_parent_class_name": "AGXArmFirmware",
+    "static_parent_metaclass_global": "0xfffffff00ab5df20"
+  }
+}
