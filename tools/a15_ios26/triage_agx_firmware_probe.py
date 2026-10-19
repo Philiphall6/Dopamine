@@ -24,8 +24,8 @@ FIRMWARE_REQUIRED = (
 )
 
 
-def triage(events: list[dict], run_id: str) -> dict:
-    report = queue_triage(events, run_id, revision=REVISION)
+def triage(events: list[dict], run_id: str, *, revision: str = REVISION) -> dict:
+    report = queue_triage(events, run_id, revision=revision)
     run = [event for event in events if event["run_id"] == run_id]
     sequence = [(event["stage"], event["status"]) for event in run]
     ordered = False

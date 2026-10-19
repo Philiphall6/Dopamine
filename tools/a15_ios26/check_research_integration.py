@@ -65,7 +65,7 @@ def main() -> int:
     with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
         app_info = plistlib.load(stream)
     require(app_info.get("A15ProbeRevision") ==
-            "self-page-write-v1+agx-firmware-read-v2+rtkit-mmio-disabled-v1",
+            "self-page-write-v1+agx-backend-identity-v1+rtkit-mmio-disabled-v1",
             "app Info.plist does not identify the MMIO-disabled revision")
     require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
             "app Info.plist does not expose the MMIO safety mode")
@@ -504,7 +504,7 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=self-page-write-v1+agx-firmware-read-v2+rtkit-mmio-disabled-v1" in jailbreaker,
+        "revision=self-page-write-v1+agx-backend-identity-v1+rtkit-mmio-disabled-v1" in jailbreaker,
         "active probe entry does not identify the MMIO-disabled build",
     )
     queue_probe_start = titan.find('titan_checkpoint(@"titan.self-gpu.queue-selector", @"START"')
@@ -612,10 +612,42 @@ def main() -> int:
             "own-client probe must follow the exact IOUAT factory identity gate")
     shared_start = titan.find("static int titan_probe_shared_alias(void)\n{")
     owned_queue_start = titan.find("static int titan_probe_owned_agx_queue(")
+    backend_slot_start = titan.find("static bool titan_probe_backend_code_slot(")
+    backend_start = titan.find("static int titan_probe_backend_identity(uint64_t device)")
     shared_end = titan.find("static int titan_resolve_ios26_iorvbar_mapping(void)",
                             shared_start)
-    require(0 <= owned_queue_start < shared_start < shared_end,
+    require(0 <= backend_slot_start < backend_start < owned_queue_start < shared_start < shared_end,
             "bounded own-client alias probe is missing")
+    slot_body = titan[backend_slot_start:backend_start]
+    backend_body = titan[backend_start:owned_queue_start]
+    for marker in (
+        "kIOS2601AGXBlockFenceMetaGlobal = 0xfffffff00ab5d6d0ULL",
+        "kIOS2601AGXBlockFenceMetaVtable = 0xfffffff007b16de0ULL",
+        "kIOS2601AGXBlockFenceInstanceVtable = 0xfffffff007b16d20ULL",
+        "kIOS2601AGXBlockFenceFactoryTarget = 0xfffffff0087e4280ULL",
+        "kIOS2601AGXBlockFenceAllocateTarget = 0xfffffff0087f630cULL",
+        "kIOS2601AGXBlockFencePrepareTarget = 0xfffffff0087f5ca8ULL",
+        'titan.backend-identity.metaclass-repeat',
+        'titan.backend-identity.metaclass-vtable',
+        'titan.backend-identity.factory',
+        'titan.backend-identity.allocate',
+        'titan.backend-identity.prepare',
+        'titan.backend-identity", @"STOP"',
+    ):
+        require(marker in titan, f"backend identity probe is missing: {marker}")
+    require(slot_body.count("titan_read_exact_scalar(slot, 0,") == 2 and
+            "raw == repeated && unslid == expected" in slot_body,
+            "backend code slot must be read twice and compared to the exact target")
+    require(backend_body.find("if (!metaclass || metaclass != metaclassAgain ||") <
+            backend_body.find("titan_probe_backend_code_slot(deviceVtable + 0x5c0") and
+            backend_body.find("titan_probe_backend_code_slot(instanceVtable + 0x90") <
+            backend_body.find('titan.backend-identity", @"PASS"'),
+            "backend code slots must follow the stable metaclass gate")
+    for forbidden in ("IOConnectCall", "IOServiceOpen(", "kwrite", "kmap(",
+                      "IOGPU_submit_command_buffers(", "gfx_reset(",
+                      "task_copy_ipc_entry("):
+        require(forbidden not in slot_body + backend_body,
+                f"backend identity probe contains forbidden call: {forbidden}")
     owned_queue_body = titan[owned_queue_start:shared_start]
     for marker in (
         'kIOS2601AGXCommandQueueVtable = 0xfffffff007b17550ULL',
@@ -637,6 +669,7 @@ def main() -> int:
         'titan.own-queue.firmware-vtable-repeat',
         'titan.own-queue.firmware-vtable',
         'titan.own-queue.firmware-read',
+        'if (titan_probe_backend_identity(device) != 0)',
     ):
         require(marker in titan, f"owned queue probe is missing: {marker}")
     for forbidden in ("IOGPU_submit_command_buffers(", "gfx_reset(",
@@ -656,8 +689,9 @@ def main() -> int:
             owned_queue_body.find('titan.own-queue.firmware-vtable-read') <
             owned_queue_body.find('titan.own-queue.firmware-vtable-repeat') <
             owned_queue_body.find('titan.own-queue.firmware-read", @"PASS"') <
+            owned_queue_body.find('if (titan_probe_backend_identity(device) != 0)') <
             owned_queue_body.find('titan.own-queue", @"PASS"'),
-            "firmware identity reads must follow same-client gate and precede bounded stop")
+            "firmware and backend identity reads must follow same-client gate and precede bounded stop")
     shared_body = titan[shared_start:shared_end]
     require('registryID != 0' in shared_body and 'registryID == 0x100000330ULL' not in shared_body,
             "AGX service guard must not pin a registry ID across boots")
