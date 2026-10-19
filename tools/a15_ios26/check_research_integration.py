@@ -65,7 +65,7 @@ def main() -> int:
     with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
         app_info = plistlib.load(stream)
     require(app_info.get("A15ProbeRevision") ==
-            "self-gpu-client-v4+rtkit-mmio-disabled-v1",
+            "self-page-write-v1+agx-firmware-read-v1+rtkit-mmio-disabled-v1",
             "app Info.plist does not identify the MMIO-disabled revision")
     require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
             "app Info.plist does not expose the MMIO safety mode")
@@ -125,11 +125,48 @@ def main() -> int:
     active_end = jailbreaker.find("- (NSError *)buildPhysRWPrimitive", active_start)
     require(active_start >= 0 and active_end > active_start, "missing bounded active probe")
     active_body = jailbreaker[active_start:active_end]
+    self_page_start = jailbreaker.find("static BOOL A15ProbeSelfPageKernelWrite")
+    self_page_end = jailbreaker.find("typedef CFTypeRef (*A15SecTaskCreateFromSelfFn)", self_page_start)
+    require(0 <= self_page_start < self_page_end < active_start,
+            "self-page writer must be isolated before the active probe")
+    self_page_body = jailbreaker[self_page_start:self_page_end]
+    for marker in (
+        "isA15IOS2601ResearchTarget",
+        'isEqualToString:@"ClearSword"',
+        'resolveSymbol:"clearsword_kreadbuf_exact"',
+        'resolveSymbol:"clearsword_kwritebuf_exact"',
+        "vm_allocate(mach_task_self()",
+        "mlock(",
+        "vtophys(ttep_self()",
+        "phystokv(physical)",
+        'A15ActiveProbeCheckpoint(@"kernel-write.self-page.attempt", @"START"',
+        "exactWrite(kernelAlias, changed, sizeof(changed))",
+        "memcmp(observed, changed, sizeof(changed))",
+        "memcmp(userBytes, changed, sizeof(changed))",
+        "exactWrite(kernelAlias, original, sizeof(original))",
+        "exactRead(safeTarget, safeRead, sizeof(safeRead))",
+        'A15ActiveProbeCheckpoint(@"kernel-write.self-page.redirect", @"PASS"',
+        "temporary page retained until process exit",
+        "vm_deallocate(mach_task_self()",
+    ):
+        require(marker in self_page_body, f"self-page writer missing guard: {marker}")
+    require(
+        active_body.find("A15ProbeSelfPageKernelWrite(kernelExploit, kernelBase)") <
+        active_body.find('A15ActiveProbeCheckpoint(@"titan.load"'),
+        "self-page write proof must precede Titan",
+    )
+    require(
+        "size != EARLY_KRW_LENGTH" in clearsword_krw
+        and "return errno != 0 ? errno : EIO;" in clearsword_krw
+        and "setsockopt(g_ctx.rw_socket" in clearsword_krw,
+        "strict ClearSword writer is missing size or syscall error checks",
+    )
     for marker in (
         "isA15IOS2601ResearchTarget",
         "A15_ACTIVE_PROBE_RUN_ID",
         'A15ActiveProbeCheckpoint(@"kernel.run"',
         'A15ActiveProbeCheckpoint(@"kernel.primitive"',
+        "A15ProbeSelfPageKernelWrite(kernelExploit, kernelBase)",
         'A15ActiveProbeCheckpoint(@"titan.run"',
         'A15ActiveProbeCheckpoint(@"titan.physwrite.publish"',
         "Documents/a15-ios26-active-probe.jsonl",
@@ -467,14 +504,14 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=self-gpu-client-v4+rtkit-mmio-disabled-v1" in jailbreaker,
+        "revision=self-page-write-v1+agx-firmware-read-v1+rtkit-mmio-disabled-v1" in jailbreaker,
         "active probe entry does not identify the MMIO-disabled build",
     )
     queue_probe_start = titan.find('titan_checkpoint(@"titan.self-gpu.queue-selector", @"START"')
     local_gate = titan.find("if (!baseline_consistent || candidate_count != 1 ||")
     selector_call = titan.find("IOConnectCallStructMethod(candidate_name,")
-    active_stop = titan.find('titan_checkpoint(@"titan.self-gpu", @"STOP"')
-    require(0 <= local_gate < queue_probe_start < selector_call < active_stop,
+    legacy_end = titan.find("static bool titan_valid_kernel_pointer", selector_call)
+    require(0 <= local_gate < queue_probe_start < selector_call < legacy_end,
             "local queue selector must follow the stable, unique local-right gate")
     require('candidate_count = titan_count_local_gpu_clients("after-metal-queue"' in titan and
             'metal_queue = [device newCommandQueue]' in titan,
@@ -482,8 +519,209 @@ def main() -> int:
     require('queue_created = kr == KERN_SUCCESS && output_size == sizeof(output)' in titan and
             'titan_checkpoint(@"titan.self-gpu.queue-selector", queue_created' in titan,
             "local queue selector result must have a persistent checkpoint")
-    require('return -1;' in titan[active_stop:active_stop + 160],
-            "A15 probe must stop before GPU submission or RTKit access")
+    metadata_start = titan.find("static int titan_probe_agx_map_metadata(void)")
+    metadata_end = titan.find("static int titan_read_exact_window", metadata_start)
+    require(metadata_start >= 0 and metadata_end > metadata_start,
+            "bounded AGX map metadata probe is missing")
+    metadata_body = titan[metadata_start:metadata_end]
+    for marker in (
+        'IOServiceMatching("AGXAccelerator")',
+        'strcmp(className, "AGXAcceleratorG14P")',
+        'kIOS2601IOMachPortVtable = 0xfffffff007abcb18ULL',
+        'kIOS2601AGXG14PInstanceVtable = 0xfffffff007b1e0d0ULL',
+        'kIOS2601AGXProbeConfig = 0xfffffff00ab5ea88ULL',
+        'titan.agx-map-metadata.service-map-address',
+        'titan.agx-map-metadata.config-flags',
+        'titan.agx-map-metadata.config-gpu-physical',
+        'titan.agx-map-metadata.config-fender-physical',
+        'titan.agx-map-metadata.config-gpu-map',
+        'titan.agx-map-metadata.config-fender-map',
+        'titan.agx-map-metadata.stability',
+        'if (!stable) goto cleanup;',
+        'titan_checkpoint(@"titan.agx-map-metadata", @"STOP"',
+    ):
+        require(marker in titan, f"AGX metadata probe is missing marker: {marker}")
+    for forbidden in (
+        "IOServiceOpen(", "IOConnectCall", "task_copy_ipc_entry(",
+        "kwrite", "kmap(", "titan_resolve_ios26_iorvbar_mapping(",
+    ):
+        require(forbidden not in metadata_body,
+                f"AGX metadata probe contains forbidden call: {forbidden}")
+    wrapper_gate = metadata_body.find("unslidWrapper != kIOS2601IOMachPortVtable")
+    object_follow = metadata_body.find("titan_read_valid_pointer(wrapper, 0x20")
+    require(0 <= wrapper_gate < object_follow,
+            "AGX wrapper object is followed before its vtable gate")
+    instance_gate = metadata_body.find("unslidInstance != kIOS2601AGXG14PInstanceVtable")
+    map_field_read = metadata_body.find("titan_read_exact_scalar(object, 0x310")
+    require(0 <= instance_gate < map_field_read,
+            "AGX map field is read before instance identity validation")
+    stability_gate = metadata_body.find("if (!stable) goto cleanup;")
+    summary_pass = metadata_body.find('titan_checkpoint(@"titan.agx-map-metadata", @"PASS"')
+    require(0 <= stability_gate < summary_pass,
+            "AGX metadata summary must follow the repeat-read stability gate")
+    iouat_start = titan.find("static int titan_probe_agx_iouat_object(uint64_t mux)")
+    gart_start = titan.find("static int titan_probe_agx_gart_state(uint64_t service)")
+    mode_start = titan.find("titan_probe_agx_uat_mode(uint64_t object)")
+    require(0 <= iouat_start < gart_start < mode_start < metadata_start,
+            "bounded AGX IOUAT and GART probes must precede metadata")
+    iouat_body = titan[iouat_start:gart_start]
+    gart_body = titan[gart_start:mode_start]
+    mode_body = titan[mode_start:metadata_start]
+    for marker in (
+        "kIOS2601AGXGartG14Vtable = 0xfffffff007b1c4d8ULL",
+        "kIOS2601AGXGartServiceOffset = 0xee80ULL",
+        "kIOS2601AGXGartStateOffset = 0x2e8ULL",
+        "kIOS2601AGXUATMuxVtable = 0xfffffff007b22ae0ULL",
+        "kIOS2601IOUATFactoryVtable = 0xfffffff007aed3a0ULL",
+        "kIOS2601AGXUATMuxIOUATOffset = 0x10ULL",
+        'titan.agx-gart-state.gart-repeat',
+        'titan.agx-gart-state.vtable-repeat',
+        'titan.agx-gart-state.identity',
+        'if (!gartType) return -1;',
+        'titan.agx-gart-state.state-repeat',
+        'titan.agx-gart-state.state-vtable-repeat',
+        'titan.agx-gart-state.mux-identity',
+        'titan.agx-iouat-object.pointer-repeat',
+        'titan.agx-iouat-object.vtable-repeat',
+        'titan.agx-iouat-object.identity',
+        'titan_checkpoint(@"titan.agx-gart-state", @"STOP"',
+    ):
+        require(marker in titan, f"AGX GART state probe is missing marker: {marker}")
+    for forbidden in ("IOServiceOpen(", "IOConnectCall", "task_copy_ipc_entry(",
+                      "kwrite", "kmap(", "titan_resolve_ios26_iorvbar_mapping("):
+        require(forbidden not in gart_body,
+                f"AGX GART state probe contains forbidden call: {forbidden}")
+    require(gart_body.find("if (!gartType) return -1;") <
+            gart_body.find("titan_read_valid_pointer(gart, kIOS2601AGXGartStateOffset"),
+            "AGX GART state is followed before the vtable identity gate")
+    require(0 <= gart_body.find("if (!muxType) return -1;") <
+            gart_body.find("titan_probe_agx_iouat_object(state)"),
+            "AGXUATMux factory field is followed before its vtable identity gate")
+    require(0 <= iouat_body.find("if (!iouat || iouat != iouatAgain)") <
+            iouat_body.find("titan_read_exact_scalar(iouat, 0"),
+            "IOUAT object vtable read must follow stable pointer gate")
+    require(0 <= iouat_body.find("if (!iouatRoute) return -1;") <
+            iouat_body.find("titan_read_valid_pointer(mux, kIOS2601AGXUATMuxIOUATOffset"),
+            "IOUAT factory field must follow stable initialized mode=1 gate")
+    for forbidden in ("IOServiceOpen(", "IOConnectCall", "task_copy_ipc_entry(",
+                      "kwrite", "kmap(", "titan_resolve_ios26_iorvbar_mapping("):
+        require(forbidden not in iouat_body,
+                f"AGX IOUAT object probe contains forbidden call: {forbidden}")
+    require(iouat_body.find("if (!factoryType) return -1;") <
+            iouat_body.find("return titan_probe_shared_alias();"),
+            "own-client probe must follow the exact IOUAT factory identity gate")
+    shared_start = titan.find("static int titan_probe_shared_alias(void)\n{")
+    owned_queue_start = titan.find("static int titan_probe_owned_agx_queue(")
+    shared_end = titan.find("static int titan_resolve_ios26_iorvbar_mapping(void)",
+                            shared_start)
+    require(0 <= owned_queue_start < shared_start < shared_end,
+            "bounded own-client alias probe is missing")
+    owned_queue_body = titan[owned_queue_start:shared_start]
+    for marker in (
+        'kIOS2601AGXCommandQueueVtable = 0xfffffff007b17550ULL',
+        'kIOS2601AGXArmFirmwareASCVtable = 0xfffffff007b18e58ULL',
+        'titan.own-queue.device-vtable',
+        'titan.own-queue.array-vtable',
+        'titan.own-queue.input-size',
+        'requiredInputSize != 0x410',
+        'sizeof(input) != 0x410 || sizeof(output) != 0x10',
+        'IOConnectCallStructMethod(connection, 6, &input,',
+        'titan.own-queue.object-repeat',
+        'titan.own-queue.object-vtable',
+        'titan.own-queue.table',
+        'titan.own-queue.device-backref',
+        'titan.own-queue.ready',
+        'titan.own-queue.buffer-repeat',
+        'titan.own-queue.identity',
+        'titan.own-queue.firmware-object-repeat',
+        'titan.own-queue.firmware-vtable-repeat',
+        'titan.own-queue.firmware-vtable',
+        'titan.own-queue.firmware-read',
+    ):
+        require(marker in titan, f"owned queue probe is missing: {marker}")
+    for forbidden in ("IOGPU_submit_command_buffers(", "gfx_reset(",
+                      "task_copy_ipc_entry(", "kwrite", "kmap(",
+                      "IOConnectCallMethod("):
+        require(forbidden not in owned_queue_body,
+                f"owned queue probe contains forbidden call: {forbidden}")
+    require(owned_queue_body.count('IOConnectCall') == 1 and
+            owned_queue_body.count('IOConnectCallStructMethod(') == 1 and
+            owned_queue_body.count('IOConnectCallStructMethod(connection, 6, &input,') == 1 and
+            owned_queue_body.find('titan.own-queue.device-vtable') <
+            owned_queue_body.find('IOConnectCallStructMethod(connection, 6, &input,') <
+            owned_queue_body.find('titan.own-queue.object-vtable'),
+            "owned queue creation must occur once, after identity gates and before object reads")
+    require(0 <= owned_queue_body.find('if (!sameClient) {') <
+            owned_queue_body.find('titan.own-queue.firmware-object') <
+            owned_queue_body.find('titan.own-queue.firmware-vtable-read') <
+            owned_queue_body.find('titan.own-queue.firmware-vtable-repeat') <
+            owned_queue_body.find('titan.own-queue.firmware-read", @"PASS"') <
+            owned_queue_body.find('titan.own-queue", @"PASS"'),
+            "firmware identity reads must follow same-client gate and precede bounded stop")
+    shared_body = titan[shared_start:shared_end]
+    for marker in (
+        'IOServiceOpen(service, mach_task_self(), 1, &connection)',
+        'if (!expectedClient) goto cleanup;',
+        'IOConnectCallMethod(connection, 12, inputs, 2,',
+        'uint64_t inputs[2] = { 0x4000, 0 };',
+        'vm_region_64(mach_task_self()',
+        'if (!writable) goto cleanup;',
+        'titan.shared-alias.registry',
+        'if (!buffer || buffer != bufferAgain ||',
+        'if (!descriptor || descriptor != backing ||',
+        'mappedAddress != output.address',
+        'mlock((void *)(uintptr_t)output.address, 0x4000)',
+        'titan_read_exact_window(alias, observed, sizeof(observed)',
+        'memcpy(userBytes, changed, sizeof(changed));',
+        'memcpy(userBytes, original, sizeof(original));',
+        'titan.shared-alias.restore',
+        'titan.shared-alias.redirect',
+        'IOServiceClose(connection)',
+    ):
+        require(marker in shared_body, f"shared alias probe is missing: {marker}")
+    for forbidden in ("IOGPU_submit_command_buffers(", "gfx_reset(",
+                      "task_copy_ipc_entry(", "kwrite", "IOConnectCallMethod(connection, 25"):
+        require(forbidden not in shared_body,
+                f"shared alias probe contains forbidden call: {forbidden}")
+    require(shared_body.find('if (!expectedClient) goto cleanup;') <
+            shared_body.find('IOConnectCallMethod(connection, 12, inputs, 2,') <
+            shared_body.find('if (!created) goto cleanup;') <
+            shared_body.find('if (!writable) goto cleanup;') <
+            shared_body.find('titan.shared-alias.registry') <
+            shared_body.find('memcpy(userBytes, changed, sizeof(changed));'),
+            "shared alias probe gates are missing or out of order")
+    require(0 <= shared_body.find('titan.shared-alias.restore') <
+            shared_body.find('titan.shared-alias.redirect') <
+            shared_body.find('if (result == 0) result = titan_probe_owned_agx_queue(') <
+            shared_body.find('IOServiceClose(connection)'),
+            "owned queue call must follow alias restoration and precede client close")
+    for marker in (
+        "kIOS2601AGXUATMode = 0xfffffff00ab61150ULL",
+        "kIOS2601AGXUATModeSourceOffset = 0xdb08ULL",
+        "kIOS2601AGXUATModeInitializedOffset = 0x10ULL",
+        "titan.agx-uat-mode.initialized-repeat",
+        "titan.agx-uat-mode.source-repeat",
+        "titan.agx-uat-mode.global-repeat",
+        "initialized == 1 && mode <= 1 && mode == (source & 1)",
+        "titan.agx-uat-mode.stability",
+        'mode ? @"IOUAT" : @"AGXUAT"',
+    ):
+        require(marker in titan, f"AGX UAT mode probe is missing marker: {marker}")
+    for forbidden in ("IOServiceOpen(", "IOConnectCall", "task_copy_ipc_entry(",
+                      "kwrite", "kmap(", "titan_resolve_ios26_iorvbar_mapping("):
+        require(forbidden not in mode_body,
+                f"AGX UAT mode probe contains forbidden call: {forbidden}")
+    require("result = titan_probe_agx_gart_state(object);" in metadata_body and
+            metadata_body.find("unslidInstance != kIOS2601AGXG14PInstanceVtable") <
+            metadata_body.find("result = titan_probe_agx_gart_state(object);"),
+            "AGX GART pointer must follow validated service identity")
+    active_branch = titan.find("if (gTitanContext.ios26_a15_active_probe) {", titan_run)
+    active_branch_end = titan.find("if (gTitanContext.ios26_a15_active_probe &&", active_branch)
+    require(active_branch >= 0 and active_branch_end > active_branch and
+            "titan_probe_agx_map_metadata();" in titan[active_branch:active_branch_end] and
+            "titan_probe_self_owned_gpu_client();" not in titan[active_branch:active_branch_end] and
+            "return -1;" in titan[active_branch:active_branch_end],
+            "A15 active branch must stop after the bounded metadata/client probe")
     for marker in (
         "static void A15RunHypervisorPreflight(void)",
         'dlsym(symbolScope, "hv_vm_create")',
@@ -506,7 +744,7 @@ def main() -> int:
     ):
         require(marker in jailbreaker, f"Hypervisor preflight is missing marker: {marker}")
     preflight_start = jailbreaker.find("static void A15RunHypervisorPreflight(void)")
-    preflight_end = jailbreaker.find("- (NSError *)gatherSystemInformation", preflight_start)
+    preflight_end = jailbreaker.find("static void A15RunAGXServiceCensus(void)", preflight_start)
     require(
         preflight_start >= 0 and preflight_end > preflight_start,
         "bounded Hypervisor preflight body is missing",
@@ -523,6 +761,31 @@ def main() -> int:
         "IOServiceOpen",
     ):
         require(forbidden not in preflight_body, f"read-only Hypervisor preflight contains {forbidden}")
+    registry_start = preflight_end
+    registry_end = jailbreaker.find("- (NSError *)gatherSystemInformation", registry_start)
+    require(registry_start >= 0 and registry_end > registry_start,
+            "AGX service census body is missing")
+    registry_body = jailbreaker[registry_start:registry_end]
+    for marker in (
+        "IORegistryCreateIterator(kIOMainPortDefault",
+        "IOObjectGetClass(entry, className)",
+        "IOIteratorIsValid(iterator)",
+        'strcmp(className, "AGXAcceleratorG14P_A0")',
+        "IORegistryEntryGetParentEntry(entry, kIOServicePlane",
+        'A15ActiveProbeCheckpoint(@"agx.registry-match"',
+        'A15ActiveProbeCheckpoint(@"agx.registry", @"SUMMARY"',
+        "iterator-valid=%@",
+        'A15ActiveProbeCheckpoint(@"agx.registry", @"STOP"',
+    ):
+        require(marker in registry_body, f"AGX service census is missing marker: {marker}")
+    for forbidden in ("IOServiceOpen(", "IOConnectCall", "kwrite", "kread", "mach_vm_write", "IOConnectMapMemory"):
+        require(forbidden not in registry_body, f"read-only AGX service census contains {forbidden}")
+    target_gate = active_body.find("isA15IOS2601ResearchTarget")
+    registry_call = active_body.find("A15RunAGXServiceCensus();")
+    preflight_call = active_body.find("A15RunHypervisorPreflight();")
+    xpf_start = active_body.find('A15ActiveProbeCheckpoint(@"xpf.gather"')
+    require(0 <= target_gate < registry_call < preflight_call < xpf_start,
+            "AGX census must run after the exact-target gate and before kernel/SPTM gathering")
     require(
         active_body.find("A15RunHypervisorPreflight();")
         < active_body.find('A15ActiveProbeCheckpoint(@"xpf.gather"'),

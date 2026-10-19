@@ -25,3 +25,9 @@ probe does not establish parser consumption, a physical write, protected
 memory access, SPTM/TXM authority, or a jailbreak. GFX MMIO and legacy
 IPC-right transfer remain disabled. No on-device result exists yet for
 this revision.
+
+The JSONL can be checked with
+`python tools/a15_ios26/triage_agx_firmware_probe.py <journal.jsonl>`.
+`firmware_identity_observed` means the identity reads and prior owned-queue
+gates were recorded in order; it does not imply a firmware call or SPTM
+access. Keep the original journal and its SHA-256 when comparing runs.
