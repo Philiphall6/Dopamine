@@ -65,7 +65,7 @@ def main() -> int:
     with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
         app_info = plistlib.load(stream)
     require(app_info.get("A15ProbeRevision") ==
-            "self-page-write-v1+agx-zero-packet-observe-v1+rtkit-mmio-disabled-v1",
+            "self-page-write-v1+agx-zero-packet-abi-v2+rtkit-mmio-disabled-v1",
             "app Info.plist does not identify the MMIO-disabled revision")
     require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
             "app Info.plist does not expose the MMIO safety mode")
@@ -504,7 +504,7 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=self-page-write-v1+agx-zero-packet-observe-v1+rtkit-mmio-disabled-v1" in jailbreaker,
+        "revision=self-page-write-v1+agx-zero-packet-abi-v2+rtkit-mmio-disabled-v1" in jailbreaker,
         "active probe entry does not identify the MMIO-disabled build",
     )
     queue_probe_start = titan.find('titan_checkpoint(@"titan.self-gpu.queue-selector", @"START"')
@@ -687,8 +687,11 @@ def main() -> int:
         'titan.zero-packet.buffer-preflight',
         'titan.zero-packet.pool-before-repeat',
         'titan.zero-packet.preflight-stability',
-        'const uint64_t scalarInput[4] = { queueID, 0, 1, 56 };',
-        'uint8_t structureInput[56] = {0};',
+        'titan.zero-packet.record-size',
+        'titan.zero-packet.record-size-repeat',
+        'titan.zero-packet.record-contract',
+        'const uint64_t scalarInput[4] = { queueID, 0, 1, recordSize };',
+        'uint8_t structureInput[kIOS2601AGXSubmitRecordSize] = {0};',
         'IOConnectCallMethod(connection, 25,',
         'titan.zero-packet.pool-after-repeat',
         'titan.zero-packet.queue-after-repeat',
@@ -712,6 +715,7 @@ def main() -> int:
     require(0 <= zero_packet_body.find('titan.zero-packet.buffer-preflight') <
             zero_packet_body.find('titan.zero-packet.pool-before') <
             zero_packet_body.find('titan.zero-packet.preflight-stability') <
+            zero_packet_body.find('titan.zero-packet.record-contract') <
             zero_packet_body.find('IOConnectCallMethod(connection, 25,') <
             zero_packet_body.find('titan.zero-packet.pool-after') <
             zero_packet_body.find('titan.zero-packet.cleanup-state') <

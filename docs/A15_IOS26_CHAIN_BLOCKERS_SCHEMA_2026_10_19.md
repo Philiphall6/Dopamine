@@ -17,7 +17,9 @@ Exact target: iPhone14,2, build 23A355.
    |
 [PASS] Live firmware, AGXBlockFence backend and packet callback identities
    |
-[NEXT IPA] One selector-25 all-zero record
+[PASS] Selector-25 route identity and exact 0x30 record-size contract
+   |
+[NEXT IPA] One selector-25 0x30 empty record
    |          Required result: accepted call plus measured pool/backend cleanup
    |
 [BLOCKED] Nonempty parser record and demonstrated owned-buffer consumption
@@ -43,7 +45,11 @@ Parallel routes do not currently bridge the chain:
 | Selector 0 | Statically converges on the same stateful batch path; no parser-only shortcut. |
 | pmap/UPPL alternatives | No independently measured protected or physical write. |
 
-The chain currently reaches stable AGX route identity, not SPTM authority.
+The first bounded selector-25 call stopped at the pre-parser record-size gate:
+v1 supplied 0x38 while the live device contract is 0x30. The queue and firmware
+pool remained unchanged, so this did not reach the parser or firmware path.
+The chain currently reaches stable AGX route identity and the exact selector
+record-size contract, not SPTM authority.
 Even a successful zero-record observation would only clear the cleanup gate
 for that empty record; it would not clear the nonempty parser, physical-write,
 protected-memory, bootstrap, or Sileo gates.

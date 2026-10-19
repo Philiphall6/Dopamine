@@ -23,6 +23,9 @@ def complete_run():
         "queue-before": "backend=0x0 status=0x0 flags=0x0/0x0 count=0 dispatch=0 ready=1 precheck=0x0 state800=0x0 state802=0x0 command-index=0",
         "pool-before-repeat": "read=0 offset=0x0 digest=0x11223344 bytes=0x208",
         "preflight-stability": "pool=same backend=0x0",
+        "record-size": "source=0xffffffdf56968000 offset=0x268 size=0x4 value=0x30",
+        "record-size-repeat": "source=0xffffffdf56968000 offset=0x268 size=0x4 value=0x30",
+        "record-contract": "device+0x268=0x30/0x30 expected=0x30",
         "call": "kr=0x0 output-count=1 output=0x0 attempt=1/1",
         "pool-after": "read=0 offset=0x0 digest=0x11223344 bytes=0x208",
         "queue-after": "backend=0x0 status=0x0 flags=0x0/0x0 count=0 dispatch=1 ready=1 precheck=0x0 state800=0x1 state802=0x0 command-index=1",
@@ -38,7 +41,7 @@ def complete_run():
     for stage, status in REQUIRED:
         name = stage.removeprefix("titan.zero-packet.")
         if stage == "titan.zero-packet.call" and status == "START":
-            value = "selector=25 queue-id=1 buffer-id=1 scalars=4 structure=0x38 output=1 attempt=1/1"
+            value = "selector=25 queue-id=1 buffer-id=1 scalars=4 structure=0x30 output=1 attempt=1/1"
         elif stage == "titan.zero-packet":
             value = "attempts=1; connection cleanup follows" if status == "STOP" else ""
         else:
@@ -82,6 +85,13 @@ class ZeroPacketTriageTests(unittest.TestCase):
                     "titan.zero-packet.call" and item["status"] == "PASS")
         index = run.index(call)
         run[index:index] = [dict(call, status="START"), dict(call)]
+        self.assertEqual(triage(run, "run-a")["verdict"], "incomplete_or_blocked")
+
+    def test_wrong_record_size_is_incomplete(self):
+        run = complete_run()
+        record = next(item for item in run if item["stage"] ==
+                      "titan.zero-packet.record-contract")
+        record["detail"] = record["detail"].replace("0x30/0x30", "0x38/0x38")
         self.assertEqual(triage(run, "run-a")["verdict"], "incomplete_or_blocked")
 
 

@@ -47,3 +47,20 @@ py tools/a15_ios26/triage_agx_zero_packet_probe.py path\to\a15-ios26-active-prob
 Only `agx_zero_packet_cleanup_observed` means that the one empty-record call
 returned and all measured cleanup invariants held. It is not a physical-write
 primitive, SPTM/TXM bypass, jailbreak, or Sileo test.
+
+## First device result
+
+The `agx-zero-packet-observe-v1` run returned `0xe00002c2` without changing the
+queue, firmware pool, registered buffer, or user mapping. Exact-image
+disassembly identifies the pre-parser mismatch:
+
+- the device constructor stores `0x30` at `device+0x268`;
+- selector 25 compares that field with scalar input 3;
+- v1 supplied `0x38`, so the method returned `kIOReturnBadArgument` before the
+  batch routine at `0xfffffff009f49254`;
+- no backend was allocated and no record was consumed.
+
+The follow-up revision `self-page-write-v1+agx-zero-packet-abi-v2+rtkit-mmio-disabled-v1`
+reads `device+0x268` twice, requires the stable exact value `0x30`, and supplies
+one 0x30-byte record. It preserves the one-call limit and all v1 preflight,
+postflight, cleanup, no-MMIO, and no-protected-write gates.

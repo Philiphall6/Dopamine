@@ -320,6 +320,14 @@ EXPECTED_EMPTY_PACKET_PATH = {
     0xfffffff009f4c2d0: ("ldr", "x8, [x16, #0xa8]!"),
     0xfffffff009f4c2e8: ("blraa", "x8, x17"),
 }
+EXPECTED_SUBMIT_RECORD_CONTRACT = {
+    0xfffffff009f43aa4: ("mov", "w8, #0x30"),
+    0xfffffff009f43aa8: ("str", "w8, [x0, #0x268]"),
+    0xfffffff009f1ae4c: ("ldr", "x8, [x0, #0x538]"),
+    0xfffffff009f1ae50: ("ldr", "w8, [x8, #0x268]"),
+    0xfffffff009f1ae54: ("cmp", "x24, x8"),
+    0xfffffff009f1ae58: ("b.ne", "#0xfffffff009f1af44"),
+}
 EXPECTED_OLD_SELECTOR_0 = {
     0xfffffff009f1c6f8: ("bl", "#0xfffffff009f38aa8"),
     0xfffffff009f1c718: ("bl", "#0xfffffff009f49254"),
@@ -647,6 +655,7 @@ def verify_queue_packet_route(agx: MachOImage, iogpu: MachOImage) -> dict:
         raise ValueError("queue packet base-method pointer chain changed")
     verify_instructions(agx, EXPECTED_PACKET_OVERRIDE)
     verify_instructions(iogpu, EXPECTED_EMPTY_PACKET_PATH)
+    verify_instructions(iogpu, EXPECTED_SUBMIT_RECORD_CONTRACT)
     verify_instructions(iogpu, EXPECTED_OLD_SELECTOR_0)
     old_entries = validate_indirect_entries(iogpu.read_u64, IOGPU_SELECTOR_0_ENTRIES)
     return {
@@ -669,6 +678,8 @@ def verify_queue_packet_route(agx: MachOImage, iogpu: MachOImage) -> dict:
         "all_zero_header_command_dispatch_skipped": True,
         "all_zero_header_finalizer_target": f"{QUEUE_EMPTY_FINALIZER:#x}",
         "all_zero_header_complete_effects_bounded": False,
+        "submit_record_size": "0x30",
+        "submit_record_size_field": "device+0x268",
     }
 
 

@@ -196,7 +196,9 @@
       "0xfffffff0088032d8",
       "0xfffffff0088032ec"
     ],
-    "parser_only_alternate_route_established": false
+    "parser_only_alternate_route_established": false,
+    "submit_record_size": "0x30",
+    "submit_record_size_field": "device+0x268"
   },
   "parser_only_selector25_device_test_bounded": false,
   "process_instruction_count": 197,
