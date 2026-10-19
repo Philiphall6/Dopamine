@@ -72,3 +72,38 @@ The JSONL can be checked with
 `firmware_identity_observed` means the identity reads and prior owned-queue
 gates were recorded in order; it does not imply a firmware call or SPTM
 access. Keep the original journal and its SHA-256 when comparing runs.
+
+## Offline follow-up: callback and pre-parser boundary
+
+The exact-image static audit was rerun against the SHA-256-pinned kernelcache
+with `audit_agx_submit_boundary.py` (without its older, queue-only journal
+argument). It confirms that the queue state write precedes the process call,
+and that the backend call and its success gate precede the parser call on the
+checked normal-return paths. Backend failure skips the parser. The candidate
+AGX backend has a reachable pool-reservation path returning without a local
+rollback; its complete effects and live object identity remain unbounded.
+
+The command-buffer callback at `0xfffffff0087fd300` loads the firmware
+object from the device's `+0x4a0` field. At its virtual call site it loads
+an argument from a command-buffer array, calls vtable slot `+0x210`, then
+stores the returned value in callback state. The v2-observed vtable resolves
+that slot to `bti c; mov x0, x1; ret`, so the static target would return the
+argument unchanged. This replaces the earlier *base-vtable* pure-virtual
+concern for the object measured by v2. It does not prove which argument a
+live submission would pass, whether the callback is reached, or whether its
+other state writes are safe. The callback's runtime command-buffer object
+was not observed.
+
+Thus the next blocker is not firmware-object identity. It is a bounded,
+reproducible account of the pre-parser queue/backend effects and the live
+packet route. The read-only v2 probe supplies neither. A new IPA that submits
+a packet merely to test reachability would cross this unbounded boundary;
+it is not justified by these results. No physical write or SPTM/TXM access
+has been demonstrated.
+
+The journal-to-image link is reproducible with
+`python tools/a15_ios26/audit_agx_firmware_v2.py <kernelcache.bin> <after.jsonl>`.
+It checks the exact kernelcache hash, the bounded v2 journal verdict, the
+constructor's final-vtable reference, the callback's slot load/call/store,
+and the observed slot target's three instructions. It deliberately does not
+infer a live packet or parser result from those static checks.
