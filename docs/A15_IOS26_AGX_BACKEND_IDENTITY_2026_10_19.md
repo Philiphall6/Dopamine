@@ -11,12 +11,11 @@ does **not** take that path.
 
 After the existing same-client and firmware gates, the new stage reads the
 live `AGXBlockFence` metaclass global twice and validates its dispatch-table
-address directly. It then
-reads the device factory, metaclass allocation, and instance preparation
-vtable slots twice each, PAC-strips the code pointers, and compares their
-unslid targets with the exact 23A355 kernelcache. Any missing, unstable, or
-unexpected value stops the probe. The owned AGX connection is closed by the
-existing cleanup path.
+address directly. It then reads the device factory, metaclass allocation,
+and instance preparation vtable slots twice each. It PAC-strips the code
+pointers and compares their unslid targets with the exact 23A355 kernelcache.
+Any missing, unstable, or unexpected value stops the probe. The owned AGX
+connection is closed by the existing cleanup path.
 
 These observations can confirm that the candidate backend class and its
 three static dispatch targets are present in live memory. They cannot prove
@@ -36,3 +35,29 @@ The v1 run on this device stopped at the metaclass check. The global held
 table address. V1 incorrectly dereferenced it and interpreted its first code
 entry (`0xfffffff0087f637c` unslid) as another vtable pointer. V2 removes that
 extra dereference; it does not relax any code-slot target comparison.
+
+## v2 device result
+
+Run `EF41B53F-9C86-4E76-AD05-05D27353A825` is preserved in
+`outputs/device/a15-agx-backend-identity-v2-20261019/after.jsonl`
+(SHA-256 `7522e14ffcf9cd7f887f018ab79960cbd3ac4da2d3555a2181fe264c0ed2f89d`).
+The triager found 228 checkpoints in the selected run, all required
+same-client, firmware, and backend identity gates in order, no first blocked
+checkpoint, no forbidden stage, connection close, and `probe.cleanup PASS`.
+Its verdict is `agx_backend_identity_observed`. The final `titan.run FAIL`
+is the deliberate bounded stop after these reads, not a backend failure.
+
+The live metaclass global held `0xfffffff007b16de0` after removing the
+slide. The factory, allocation, and preparation slots resolved to
+`0xfffffff0087e4280`, `0xfffffff0087f630c`, and `0xfffffff0087f5ca8`
+respectively, matching the pinned image. The firmware object's observed
+vtable remained `0xfffffff007b19ab8`, not the ASC base vtable; this is an
+informational identity result, not a failed gate.
+
+**Decision: no packet-submission IPA on this evidence.** The live reads
+validate the candidate dispatch tables but do not show a factory call,
+returned backend object, reversible preparation effects, packet consumption,
+physical write, or SPTM/TXM access. The exact-image pre-parser analysis in
+`A15_IOS26_BLOCKERS_AFTER_QUEUE_2026_10_19.md` still identifies stateful
+effects and unresolved downstream callbacks. Further work belongs in the
+offline effect audit before another device experiment is considered.
