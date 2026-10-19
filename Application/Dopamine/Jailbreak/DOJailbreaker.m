@@ -669,7 +669,7 @@ static void A15RunAGXServiceCensus(void)
 
     NSString *runID = NSUUID.UUID.UUIDString;
     setenv("A15_ACTIVE_PROBE_RUN_ID", runID.UTF8String, 1);
-    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=self-page-write-v1+agx-shared-alias-v1+rtkit-mmio-disabled-v1");
+    A15ActiveProbeCheckpoint(@"probe.entry", @"START", @"target=iPhone14,2 build=23A355 mode=active-titan-bounded revision=self-page-write-v1+agx-own-queue-v1+rtkit-mmio-disabled-v1");
 
     A15RunAGXServiceCensus();
     A15RunHypervisorPreflight();
