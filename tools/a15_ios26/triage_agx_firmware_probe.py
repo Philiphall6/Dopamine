@@ -12,7 +12,7 @@ from triage_agx_metadata_probe import fields, load_events, numbered
 from triage_agx_owned_queue_probe import detail, triage as queue_triage
 
 
-REVISION = "self-page-write-v1+agx-firmware-read-v1+rtkit-mmio-disabled-v1"
+REVISION = "self-page-write-v1+agx-firmware-read-v2+rtkit-mmio-disabled-v1"
 FIRMWARE_REQUIRED = (
     ("titan.own-queue.firmware-read", "START"),
     ("titan.own-queue.firmware-object", "PASS"),

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>A15ProbeRevision</key>
-	<string>self-page-write-v1+agx-firmware-read-v1+rtkit-mmio-disabled-v1</string>
+	<string>self-page-write-v1+agx-firmware-read-v2+rtkit-mmio-disabled-v1</string>
 	<key>A15ProbeSafetyMode</key>
 	<string>no-gfx-mmio</string>
 	<key>UIApplicationSceneManifest</key>

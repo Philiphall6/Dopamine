@@ -65,7 +65,7 @@ def main() -> int:
     with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
         app_info = plistlib.load(stream)
     require(app_info.get("A15ProbeRevision") ==
-            "self-page-write-v1+agx-firmware-read-v1+rtkit-mmio-disabled-v1",
+            "self-page-write-v1+agx-firmware-read-v2+rtkit-mmio-disabled-v1",
             "app Info.plist does not identify the MMIO-disabled revision")
     require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
             "app Info.plist does not expose the MMIO safety mode")
@@ -504,7 +504,7 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=self-page-write-v1+agx-firmware-read-v1+rtkit-mmio-disabled-v1" in jailbreaker,
+        "revision=self-page-write-v1+agx-firmware-read-v2+rtkit-mmio-disabled-v1" in jailbreaker,
         "active probe entry does not identify the MMIO-disabled build",
     )
     queue_probe_start = titan.find('titan_checkpoint(@"titan.self-gpu.queue-selector", @"START"')
@@ -659,6 +659,8 @@ def main() -> int:
             owned_queue_body.find('titan.own-queue", @"PASS"'),
             "firmware identity reads must follow same-client gate and precede bounded stop")
     shared_body = titan[shared_start:shared_end]
+    require('registryID != 0' in shared_body and 'registryID == 0x100000330ULL' not in shared_body,
+            "AGX service guard must not pin a registry ID across boots")
     for marker in (
         'IOServiceOpen(service, mach_task_self(), 1, &connection)',
         'if (!expectedClient) goto cleanup;',
