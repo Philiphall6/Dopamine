@@ -36,7 +36,36 @@ journal. A missing value, mismatch between repeated reads, reboot, or
 incomplete journal is a stop, not a reason to retry automatically. This
 probe does not establish parser consumption, a physical write, protected
 memory access, SPTM/TXM authority, or a jailbreak. GFX MMIO and legacy
-IPC-right transfer remain disabled. No on-device result exists yet for v2.
+IPC-right transfer remain disabled.
+
+## v2 device result and exact-image interpretation
+
+Run `A47F1FC8-896E-485F-A6F2-291B8E293106` completed without a reboot.
+The two post-run USB copies of
+`outputs/device/a15-firmware-read-v2-20261019/after.jsonl` match exactly
+(SHA-256 `6fc2f3e53706ecee7909b5be42ba21451bc3388570b5fd6f95da5083987979f6`);
+the earlier 480044-byte journal is its exact prefix. The triager found 211
+checkpoints, the prior alias and same-client queue gates in order, no blocked
+or forbidden stage, connection close, and `probe.cleanup PASS`.
+
+The device's `+0x4a0` pointer was stable at `0xffffffe5ed494000` and its
+PAC-stripped, unslid vtable pointer was `0xfffffff007b19ab8`, not the
+statically allocated ASC base vtable `0xfffffff007b18e58`. In the exact
+`23A355` kernelcache (SHA-256
+`8867208c59bfa426611c36fcfe570ffc41cc75ee293472fe7197860d0c5223f1`),
+the AGX initializer beginning at `0xfffffff00884b540` first installs the
+base vtable at `0xfffffff00884b580`, then installs the observed vtable at
+`0xfffffff00884bde8`-`0xfffffff00884bdfc`. The observed vtable's `+0x210`
+slot contains `0x801192500183dd6c`; its image-relative target is
+`0xfffffff008841d6c` (`bti c; mov x0, x1; ret`). The base slot contains
+`0x8011925001630720` and resolves to `0xfffffff008634720`, the previously
+identified pure-virtual stub. Forty-five of the first 67 vtable slots differ.
+
+This resolves the static-base ambiguity for the object at the time of the
+read. It does not establish that this object or slot remains unchanged when
+the command-buffer callback runs, that a packet reaches that callback, or
+that any parser, physical write, protected-memory access, or SPTM/TXM
+authority is available. No active packet test is authorized by this result.
 
 The JSONL can be checked with
 `python tools/a15_ios26/triage_agx_firmware_probe.py <journal.jsonl>`.
