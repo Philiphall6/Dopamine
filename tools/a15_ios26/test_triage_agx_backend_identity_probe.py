@@ -2,23 +2,24 @@ import unittest
 
 from test_triage_agx_firmware_probe import complete_run as firmware_run
 from test_triage_agx_iouat_object_probe import event
-from triage_agx_backend_identity_probe import META_VTABLE, REQUIRED, REVISION, SLOTS, triage
+from triage_agx_backend_identity_probe import META_VTABLE, REQUIRED, REVISION, SLOTS, SLOT_ADDRESSES, triage
 from triage_agx_firmware_probe import REVISION as FIRMWARE_REVISION
 
 
 def complete_run():
     run = firmware_run(base_match=False)
     run[0]["detail"] = run[0]["detail"].replace(FIRMWARE_REVISION, REVISION)
-    metaclass = 0xffffffe018700000
+    slide = 0x3ab78000
+    metaclass = META_VTABLE + slide
     details = {
         ("titan.backend-identity.metaclass", "PASS"): f"value=0x{metaclass:x} exact=0x8",
         ("titan.backend-identity.metaclass-repeat", "PASS"): f"value=0x{metaclass:x} exact=0x8",
-        ("titan.backend-identity.metaclass-vtable-identity", "PASS"):
-            f"object=0x{metaclass:x} unslid=0x{META_VTABLE:x} expected=0x{META_VTABLE:x}",
+        ("titan.backend-identity.metaclass-identity", "PASS"):
+            f"value=0x{metaclass:x} unslid=0x{META_VTABLE:x} expected=0x{META_VTABLE:x}",
     }
     for index, (name, target) in enumerate(SLOTS.items()):
         prefix = f"titan.backend-identity.{name}"
-        slot = 0xfffffff040000000 + index * 8
+        slot = SLOT_ADDRESSES[name] + slide
         raw = 0x1234000000000000 + index
         for suffix in ("-read", "-repeat"):
             details[(prefix + suffix, "PASS")] = (
@@ -53,6 +54,23 @@ class BackendIdentityTriageTests(unittest.TestCase):
         item = next(item for item in run if item["stage"] ==
                     "titan.backend-identity.factory" and item["status"] == "PASS")
         item["detail"] = item["detail"].replace("0xfffffff0087e4280", "0xfffffff0087e4284")
+        self.assertEqual(triage(run, "run-a")["verdict"], "incomplete_or_blocked")
+
+    def test_wrong_metaclass_dispatch_table_is_incomplete(self):
+        run = complete_run()
+        item = next(item for item in run if item["stage"] ==
+                    "titan.backend-identity.metaclass-identity")
+        item["detail"] = item["detail"].replace(
+            f"unslid=0x{META_VTABLE:x}", f"unslid=0x{META_VTABLE + 8:x}")
+        self.assertEqual(triage(run, "run-a")["verdict"], "incomplete_or_blocked")
+
+    def test_wrong_slot_address_is_incomplete(self):
+        run = complete_run()
+        item = next(item for item in run if item["stage"] ==
+                    "titan.backend-identity.factory" and item["status"] == "PASS")
+        correct = SLOT_ADDRESSES["factory"] + 0x3ab78000
+        item["detail"] = item["detail"].replace(
+            f"slot=0x{correct:x}", f"slot=0x{correct + 8:x}")
         self.assertEqual(triage(run, "run-a")["verdict"], "incomplete_or_blocked")
 
     def test_forbidden_packet_stage_is_rejected(self):

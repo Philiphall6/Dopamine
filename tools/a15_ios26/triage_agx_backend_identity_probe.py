@@ -13,19 +13,23 @@ from triage_agx_metadata_probe import fields, load_events, numbered
 from triage_agx_owned_queue_probe import detail
 
 
-REVISION = "self-page-write-v1+agx-backend-identity-v1+rtkit-mmio-disabled-v1"
+REVISION = "self-page-write-v1+agx-backend-identity-v2+rtkit-mmio-disabled-v1"
 META_VTABLE = 0xfffffff007b16de0
 SLOTS = {
     "factory": 0xfffffff0087e4280,
     "allocate": 0xfffffff0087f630c,
     "prepare": 0xfffffff0087f5ca8,
 }
+SLOT_ADDRESSES = {
+    "factory": 0xfffffff007b1e690,
+    "allocate": 0xfffffff007b16e48,
+    "prepare": 0xfffffff007b16db0,
+}
 REQUIRED = (
     ("titan.backend-identity", "START"),
     ("titan.backend-identity.metaclass", "PASS"),
     ("titan.backend-identity.metaclass-repeat", "PASS"),
-    ("titan.backend-identity.metaclass-vtable", "PASS"),
-    ("titan.backend-identity.metaclass-vtable-identity", "PASS"),
+    ("titan.backend-identity.metaclass-identity", "PASS"),
     *((f"titan.backend-identity.{name}{suffix}", "PASS")
       for name in SLOTS for suffix in ("-read", "-repeat", "")),
     ("titan.backend-identity", "PASS"),
@@ -49,11 +53,12 @@ def triage(events: list[dict], run_id: str) -> dict:
     metaclass = numbered(detail(run, "titan.backend-identity.metaclass"), "value")
     meta_stable = bool(metaclass and metaclass == numbered(
         detail(run, "titan.backend-identity.metaclass-repeat"), "value"))
-    identity = detail(run, "titan.backend-identity.metaclass-vtable-identity")
+    identity = detail(run, "titan.backend-identity.metaclass-identity")
     meta_type = bool(meta_stable and
-                     numbered(identity, "object") == metaclass and
+                     numbered(identity, "value") == metaclass and
                      numbered(identity, "unslid") == META_VTABLE and
                      numbered(identity, "expected") == META_VTABLE)
+    slide = metaclass - META_VTABLE if meta_type else 0
 
     slots_ok = True
     for name, target in SLOTS.items():
@@ -63,7 +68,8 @@ def triage(events: list[dict], run_id: str) -> dict:
         summary = detail(run, prefix)
         slot = numbered(summary, "slot")
         raw = numbered(first, "value")
-        slots_ok &= bool(slot and raw and raw == numbered(second, "value") and
+        slots_ok &= bool(meta_type and slot == SLOT_ADDRESSES[name] + slide and
+                         raw and raw == numbered(second, "value") and
                          numbered(first, "source") == slot and
                          numbered(second, "source") == slot and
                          numbered(first, "offset") == 0 and

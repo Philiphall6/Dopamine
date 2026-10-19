@@ -1,6 +1,6 @@
 # A15 / 23A355: bounded AGX backend identity IPA
 
-Revision: `self-page-write-v1+agx-backend-identity-v1+rtkit-mmio-disabled-v1`.
+Revision: `self-page-write-v1+agx-backend-identity-v2+rtkit-mmio-disabled-v1`.
 Target: iPhone14,2, iOS 26.0.1, build 23A355 only.
 
 The firmware-read v2 journal established one owned AGX client, buffer, queue,
@@ -10,7 +10,8 @@ enter a potentially stateful backend before reaching the parser. This IPA
 does **not** take that path.
 
 After the existing same-client and firmware gates, the new stage reads the
-live `AGXBlockFence` metaclass global twice and validates its vtable. It then
+live `AGXBlockFence` metaclass global twice and validates its dispatch-table
+address directly. It then
 reads the device factory, metaclass allocation, and instance preparation
 vtable slots twice each, PAC-strips the code pointers, and compares their
 unslid targets with the exact 23A355 kernelcache. Any missing, unstable, or
@@ -29,3 +30,9 @@ The journal can be assessed with
 `agx_backend_identity_observed` denotes only the ordered identity reads and
 cleanup. A reboot, incomplete journal, or unexpected active stage is a stop,
 not a reason for an automatic second attempt.
+
+The v1 run on this device stopped at the metaclass check. The global held
+`0xfffffff007b16de0` after removing the slide, exactly the expected dispatch
+table address. V1 incorrectly dereferenced it and interpreted its first code
+entry (`0xfffffff0087f637c` unslid) as another vtable pointer. V2 removes that
+extra dereference; it does not relax any code-slot target comparison.

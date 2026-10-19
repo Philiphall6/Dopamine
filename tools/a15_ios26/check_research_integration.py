@@ -65,7 +65,7 @@ def main() -> int:
     with (ROOT / "Application/Dopamine/Info.plist").open("rb") as stream:
         app_info = plistlib.load(stream)
     require(app_info.get("A15ProbeRevision") ==
-            "self-page-write-v1+agx-backend-identity-v1+rtkit-mmio-disabled-v1",
+            "self-page-write-v1+agx-backend-identity-v2+rtkit-mmio-disabled-v1",
             "app Info.plist does not identify the MMIO-disabled revision")
     require(app_info.get("A15ProbeSafetyMode") == "no-gfx-mmio",
             "app Info.plist does not expose the MMIO safety mode")
@@ -504,7 +504,7 @@ def main() -> int:
     ):
         require(marker in ipc_port, f"bounded IPC census is missing marker: {marker}")
     require(
-        "revision=self-page-write-v1+agx-backend-identity-v1+rtkit-mmio-disabled-v1" in jailbreaker,
+        "revision=self-page-write-v1+agx-backend-identity-v2+rtkit-mmio-disabled-v1" in jailbreaker,
         "active probe entry does not identify the MMIO-disabled build",
     )
     queue_probe_start = titan.find('titan_checkpoint(@"titan.self-gpu.queue-selector", @"START"')
@@ -628,7 +628,7 @@ def main() -> int:
         "kIOS2601AGXBlockFenceAllocateTarget = 0xfffffff0087f630cULL",
         "kIOS2601AGXBlockFencePrepareTarget = 0xfffffff0087f5ca8ULL",
         'titan.backend-identity.metaclass-repeat',
-        'titan.backend-identity.metaclass-vtable',
+        'titan.backend-identity.metaclass-identity',
         'titan.backend-identity.factory',
         'titan.backend-identity.allocate',
         'titan.backend-identity.prepare',
@@ -638,7 +638,7 @@ def main() -> int:
     require(slot_body.count("titan_read_exact_scalar(slot, 0,") == 2 and
             "raw == repeated && unslid == expected" in slot_body,
             "backend code slot must be read twice and compared to the exact target")
-    require(backend_body.find("if (!metaclass || metaclass != metaclassAgain ||") <
+    require(backend_body.find("metaclass - slide == kIOS2601AGXBlockFenceMetaVtable") <
             backend_body.find("titan_probe_backend_code_slot(deviceVtable + 0x5c0") and
             backend_body.find("titan_probe_backend_code_slot(instanceVtable + 0x90") <
             backend_body.find('titan.backend-identity", @"PASS"'),
